@@ -1,0 +1,28 @@
+from dotenv import load_dotenv
+from os import getenv
+from mssql_python import connect
+
+load_dotenv()
+
+AZ_SQL_CONNECTIONSTRING = getenv("AZURE_SQL_CONNECTIONSTRING")
+
+def execute_query(sql: str) -> None:
+    '''
+    Executa uma instrução SQL no banco de dados.
+
+    Abre uma conexão com o SQL Server utilizando a string de conexão
+    configurada em AZ_SQL_CONNECTIONSTRING no .env e executa a instrução SQL
+    recebida.
+
+    Args:
+        sql (str): Instrução SQL que será executada no banco de dados.
+
+    Returns:
+        None
+    '''
+    try:
+        with connect(AZ_SQL_CONNECTIONSTRING) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+    except Exception as error:
+        print(f"Erro ao conectar: {error}")
