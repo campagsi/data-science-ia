@@ -1,4 +1,4 @@
 pydantic
 python-dotenv
-mssql_python
+mssql-python
 

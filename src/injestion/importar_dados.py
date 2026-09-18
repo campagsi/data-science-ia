@@ -2,8 +2,8 @@ import requests
 from os import getenv
 from dotenv import load_dotenv
 from src.models.cidade_model import Cidade_Model
-from src.models.operador_model import Operador_Model
-from src.database.connection import execute_query
+#from src.models.operador_model import Operador_Model
+from src.repository.cidade_repository import CidadeRepository
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -72,6 +72,25 @@ BASE_URL = getenv('MOCK_API')
 #     except Exception as error:
 #         print(error)
 
+def importar_cidades(dados):
+    try:
+        cidades = []
+        #cidades_tuples = [(cidade.nome, cidade.estado) for cidade in cidades]
+        for cidade in dados:
+       
+            cidade_model = Cidade_Model(**{'nome': cidade['cidade_nome'], 'estado': cidade['cidade_estado']})
+            if cidade_model not in cidades: 
+                cidades.append(cidade_model)
+        cidades_tuples = [(cidade.nome, cidade.estado) for cidade in cidades]
+        CidadeRepository.create_many_cidades(cidades_tuples)
+        print(cidades)
+        print("Processo concluído! Todas as cidades foram gravadas de uma só vez.")
+    except requests.RequestException as error:
+        print(f'Erro ao acessar a API: {error}')
+        raise
+    except Exception as error:
+        print(f'Erro durante a importação: {error}')
+        raise
 
 def sanitizar_dados(dados) -> dict:
     cidades = []
@@ -88,7 +107,7 @@ def importar_dados():
         resposta = requests.get(f'{BASE_URL}/data-set', timeout=30)
         resposta.raise_for_status()
         dados = resposta.json()
-        print(sanitizar_dados(dados)['cidades'])
+        print(importar_cidades(dados))
      #   importar_dados_operadores()
     except requests.RequestException as error:
         print(f'Erro ao acessar a API: {error}')

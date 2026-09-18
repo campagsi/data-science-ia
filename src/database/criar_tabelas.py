@@ -1,5 +1,5 @@
 
-from src.database.connection import execute_query
+from src.database.connection import DatabaseConnection
 
 ## Realiza a criação das tabelas no banco de dados caso não exista
 
@@ -17,7 +17,7 @@ def __criar_tabela_cidades():
             );
         END;
         """
-    execute_query(query)
+    DatabaseConnection.execute(query)
 
 
 def __criar_tabela_operadores():  
@@ -39,7 +39,7 @@ def __criar_tabela_operadores():
             );
         END;
         """
-    execute_query(query)
+    DatabaseConnection.execute(query)
 
 
 def __criar_tabela_estacoes():
@@ -67,7 +67,7 @@ def __criar_tabela_estacoes():
                 );
             END;
         """
-    execute_query(query)
+    DatabaseConnection.execute(query)
 
 
 def __criar_tabela_leituras():    
@@ -99,7 +99,7 @@ def __criar_tabela_leituras():
                 );
             END;              
         """
-    execute_query(query)
+    DatabaseConnection.execute(query)
 
 def criar_tabelas():
     '''
