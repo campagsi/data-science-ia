@@ -15,7 +15,8 @@ flowchart TD
 	parse --> estrutura{Estrutura e tipos validos?}
 	estrutura -- Nao --> rejeitar[Rejeitar carga e registrar inconsistencias]
 	rejeitar --> fim_erro
-	estrutura -- Sim --> limpar[Tratar campos ausentes ou nulos]
+	 estrutura -- Sim --> normalizar[Converter numeros, booleanos e data/hora]
+	 normalizar --> limpar[Tratar campos ausentes ou nulos]
 
 	limpar --> dados_sensiveis{Existem dados sensiveis?}
 	dados_sensiveis -- Sim --> anonimizar[Anonimizar ou remover identificadores sensiveis]
@@ -60,7 +61,7 @@ flowchart TD
 	class inicio,fim,fim_erro,fim_sem_dados inicioFim;
 	class credenciais,carga,estrutura,dados_sensiveis,registros,banco,testes_ok,revisar decisao;
 	class erro_config,registrar_falha,rejeitar,erro_banco erro;
-	class configurar,fonte,parse,limpar,anonimizar,validar,persistir,consultar,extrair,estatistica,dispersao,outliers,resultado,testes,corrigir,documentar,branch,commit,pull_request,corrigir_pr,entrega processamento;
+	 class configurar,fonte,parse,normalizar,limpar,anonimizar,validar,persistir,consultar,extrair,estatistica,dispersao,outliers,resultado,testes,corrigir,documentar,branch,commit,pull_request,corrigir_pr,entrega processamento;
 ```
 
 ## Explicação de cada fase

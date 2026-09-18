@@ -29,6 +29,7 @@ classDiagram
         +String codigo
         +String nome
         +String tipo
+        +boolean ativo
     }
 
     class Estacoes {
@@ -52,13 +53,14 @@ classDiagram
         +decimal pressao
         +decimal precipitacao
         +decimal velocidade_vento
-        +String direcao_vento
+        +decimal direcao_vento
         +decimal radiacao_solar
         +decimal temperatura_agua
         +decimal ph
         +decimal oxigenio_dissolvido
         +decimal condutividade
         +decimal turbidez
+        +String fonte
     }
 
     note for Cidades "PK: id"
@@ -83,12 +85,13 @@ Representa os responsáveis ou entidades que operam as estações de monitoramen
 - `codigo`: código de identificação do operador
 - `nome`: nome do operador
 - `tipo`: tipo de operador
+- `ativo`: indica se o operador está ativo
 
 ### `Estacoes`
 Contém os dados cadastrais e geográficos da estação.
 
 - `id`: identificador único da estação
-- `codigo`: código interno da estação
+- `codigo`: código interno da estação, recebido em `estacao_codigo`
 - `nome`: nome da estação
 - `cidade_id`: chave estrangeira para a cidade
 - `operador_id`: chave estrangeira para o operador
@@ -108,13 +111,14 @@ Armazena os registros de monitoramento coletados em cada estação ao longo do t
 - `pressao`: pressão atmosférica
 - `precipitacao`: volume de precipitação
 - `velocidade_vento`: velocidade do vento
-- `direcao_vento`: direção do vento
+- `direcao_vento`: direção do vento em graus
 - `radiacao_solar`: radiação solar
 - `temperatura_agua`: temperatura da água
 - `ph`: potencial hidrogeniônico da água
 - `oxigenio_dissolvido`: nível de oxigênio dissolvido
 - `condutividade`: condutividade elétrica
 - `turbidez`: nível de turbidez
+- `fonte`: origem do registro, como `SIMULADO` ou uma API externa
 
 ## Considerações
 
@@ -126,3 +130,10 @@ O modelo foi organizado para separar claramente:
 * registros históricos das medições.
 
 Essa organização evita redundância de informações e facilita consultas por cidade, operador, estação e período de coleta. A tabela de leituras funciona como o principal conjunto de dados analíticos, permitindo filtros, agregações e análises ambientais ao longo do tempo.
+
+## Integridade e idempotência
+
+- `Operadores.codigo` deve ser único.
+- `Estacoes.codigo` deve ser único.
+- `Leituras` deve possuir uma restrição única para `estacao_id` e `data_hora`.
+- Os campos `latitude`, `longitude`, `ativa` e os valores ambientais devem ser persistidos após a normalização do JSON, nunca diretamente como texto bruto.
