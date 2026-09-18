@@ -24,5 +24,11 @@ def execute_query(sql: str) -> None:
         with connect(AZ_SQL_CONNECTIONSTRING) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql)
+
+            # O commit é feito na CONEXÃO (conn), após o cursor executar a query
+            conn.commit()
+
     except Exception as error:
-        print(f"Erro ao conectar: {error}")
+        # Melhorar a mensagem ajuda a não confundir erro de conexão com erro de sintaxe SQL
+        print(f"Erro de banco de dados: {error}")
+        raise

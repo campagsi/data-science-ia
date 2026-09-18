@@ -1,5 +1,5 @@
 
-from database.connection import execute_query
+from src.database.connection import execute_query
 
 ## Realiza a criação das tabelas no banco de dados caso não exista
 
@@ -34,7 +34,7 @@ def __criar_tabela_operadores():
                 tipo VARCHAR(50),
                 cidade_id INT NOT NULL,
 
-                CONSTRAINT FK_Operadores_Cidades FOREIGN KEY (id)
+                CONSTRAINT FK_Operadores_Cidades FOREIGN KEY (cidade_id)
                     REFERENCES Cidades(id)
             );
         END;
@@ -105,6 +105,8 @@ def criar_tabelas():
     '''
       Função responsável por criar todas as tabelas necessárias no banco de dados
     '''
+
+    # execute_query(drop)
     __criar_tabela_cidades()
     __criar_tabela_operadores()
     __criar_tabela_estacoes()
