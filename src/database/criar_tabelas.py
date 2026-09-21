@@ -1,12 +1,13 @@
-
 from src.database.connection import DatabaseConnection
 
-## Realiza a criação das tabelas no banco de dados caso não exista
+database = DatabaseConnection()
 
-def __criar_tabela_cidades():   
-    '''
+
+## Realiza a criação das tabelas no banco de dados caso não exista
+def __criar_tabela_cidades():
+    """
     Realiza a criação da tabela Cidades no banco de dados caso não exista
-    ''' 
+    """
     query = """
         IF OBJECT_ID('dbo.Cidades', 'U') IS NULL
         BEGIN
@@ -17,13 +18,13 @@ def __criar_tabela_cidades():
             );
         END;
         """
-    DatabaseConnection.execute(query)
+    database.execute(query)
 
 
-def __criar_tabela_operadores():  
-    '''
+def __criar_tabela_operadores():
+    """
     Realiza a criação da tabela Operadores no banco de dados caso não exista
-    '''   
+    """
     query = """
         IF OBJECT_ID('dbo.Operadores', 'U') IS NULL
         BEGIN
@@ -39,13 +40,13 @@ def __criar_tabela_operadores():
             );
         END;
         """
-    DatabaseConnection.execute(query)
+    database.execute(query)
 
 
 def __criar_tabela_estacoes():
-    '''
+    """
     Realiza a criação da tabela Estacoes no banco de dados caso não exista
-    '''     
+    """
     query = """
             IF OBJECT_ID('dbo.Estacoes', 'U') IS NULL
             BEGIN
@@ -67,13 +68,13 @@ def __criar_tabela_estacoes():
                 );
             END;
         """
-    DatabaseConnection.execute(query)
+    database.execute(query)
 
 
-def __criar_tabela_leituras():    
-    '''
+def __criar_tabela_leituras():
+    """
     Realiza a criação da tabela Leituras no banco de dados caso não exista
-    ''' 
+    """
     query = """
             IF OBJECT_ID('dbo.Leituras', 'U') IS NULL
             BEGIN
@@ -99,16 +100,37 @@ def __criar_tabela_leituras():
                 );
             END;              
         """
-    DatabaseConnection.execute(query)
+    database.execute(query)
+
+
+def __excluir_tabelas():
+    """Exclui as tabelas e seus dados"""
+    query = """
+        DROP TABLE IF EXISTS dbo.Leituras;
+        DROP TABLE IF EXISTS dbo.Estacoes;
+        DROP TABLE IF EXISTS dbo.Operadores;
+        DROP TABLE IF EXISTS dbo.Cidades;
+    """
+    database.execute(query)
+
 
 def criar_tabelas():
-    '''
-      Função responsável por criar todas as tabelas necessárias no banco de dados
-    '''
-
-    # execute_query(drop)
+    """
+    Função responsável por criar todas as tabelas necessárias no banco de dados
+    """
     __criar_tabela_cidades()
     __criar_tabela_operadores()
     __criar_tabela_estacoes()
     __criar_tabela_leituras()
 
+
+def recriar_tabelas():
+    __excluir_tabelas()
+    __criar_tabela_cidades()
+    __criar_tabela_operadores()
+    __criar_tabela_estacoes()
+    __criar_tabela_leituras()
+
+
+if __name__ == "__main__":
+    recriar_tabelas()

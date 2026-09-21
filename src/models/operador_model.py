@@ -1,8 +1,8 @@
 from pydantic import BaseModel
 
-class Operador_Model(BaseModel):
-    id: int | None = None
+
+class OperadorModel(BaseModel):
     codigo: str
-    nome: str   
+    nome: str
     tipo: str
     cidade_id: int

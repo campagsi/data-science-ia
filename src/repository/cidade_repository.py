@@ -1,21 +1,61 @@
-from src.database.connection import DatabaseConnection
+from src.database import DatabaseConnection
+from src.models.cidade_model import CidadeModel
 
 
 class CidadeRepository:
-    @staticmethod
-    def get_cidade_by_id(cidade_id: int):
-        query = f"SELECT * FROM cidades WHERE id = {cidade_id}"
-        result = DatabaseConnection.execute(query)
-        return result
+    def __init__(self) -> None:
+        self.__database = DatabaseConnection()
 
-    @staticmethod
-    def create_cidade(nome: str, estado: str):
-        query = f"INSERT INTO cidades (nome, estado) VALUES ('{nome}', '{estado}')"
-        DatabaseConnection.execute(query)
+    def get_by_id(self, cidadeID: int) -> dict:
+        query = "SELECT * FROM cidades WHERE id = ?"
+        result = self.__database.fetch_one(query, (cidadeID,))
 
-    @staticmethod
-    def create_many_cidades(cidades: list):
+        if not result:
+            return None
+
+        return {"id": result[0], "nome": result[1], "estado": result[2]}
+
+    def get_by_name(self, nome: str) -> dict | None:
+        query = "SELECT id, nome, estado FROM cidades WHERE nome = ?"
+        result = self.__database.fetch_one(
+            query,
+            (nome,),
+        )
+
+        if not result:
+            return None
+
+        return {"id": result[0], "nome": result[1], "estado": result[2]}
+
+    def get_all(self) -> list:
+        query = "SELECT id, nome, estado FROM cidades"
+        result = self.__database.fetch_all(query)
+
+        return [
+            {
+                "id": linha[0],
+                "nome": linha[1],
+                "estado": linha[2],
+            }
+            for linha in result
+        ]
+
+    def create(self, cidade: CidadeModel):
         query = "INSERT INTO cidades (nome, estado) VALUES (?, ?)"
-        DatabaseConnection.execute_many(query, cidades)
 
-    
+        param = (cidade.nome, cidade.estado)
+
+        return self.__database.execute(query, param)
+
+    def create_many(self, cidades: list[CidadeModel]):
+        query = "INSERT INTO cidades (nome, estado) VALUES (?, ?)"
+
+        params = [
+            (
+                cidade.nome,
+                cidade.estado,
+            )
+            for cidade in cidades
+        ]
+
+        return self.__database.execute_many(query, params)
