@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-class Cidade_Model(BaseModel):
-    id: int
+
+class CidadeModel(BaseModel):
     nome: str
     estado: str
