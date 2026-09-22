@@ -42,15 +42,13 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 
 ## 3. Configurar variáveis de ambiente
 
-Crie um arquivo `.env` com base no `.env.example` e defina valores como:
+Crie `Data-Science-Ia/.env` com base no `.env.example` e informe a string do Azure SQL:
 
 ```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=monitoramento
-DB_USER=postgres
-DB_PASSWORD=sua_senha
+AZURE_SQL_CONNECTIONSTRING="Server=tcp:seu-servidor.database.windows.net,1433;Database=seu_banco;UID=seu_usuario;PWD=sua_senha;Encrypt=yes;TrustServerCertificate=no"
 ```
+
+Nao use `DB_HOST`, `DB_PORT`, `DB_USER` ou `DB_PASSWORD`: essas variaveis pertencem a uma configuracao PostgreSQL e nao sao lidas pelo codigo atual.
 
 ## 4. Criar banco e tabelas
 

@@ -1,8 +1,9 @@
 from dotenv import load_dotenv
 from os import getenv
+from pathlib import Path
 from mssql_python import connect
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 AZ_SQL_CONNECTIONSTRING = getenv("AZURE_SQL_CONNECTIONSTRING")
 
@@ -20,6 +21,12 @@ def execute_query(sql: str) -> None:
     Returns:
         None
     '''
+    if not AZ_SQL_CONNECTIONSTRING:
+        raise RuntimeError(
+            "AZURE_SQL_CONNECTIONSTRING nao foi configurada. "
+            "Crie Data-Science-Ia/.env com a string de conexao do Azure SQL."
+        )
+
     try:
         with connect(AZ_SQL_CONNECTIONSTRING) as conn:
             with conn.cursor() as cursor:
