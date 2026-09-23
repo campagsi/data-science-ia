@@ -46,6 +46,7 @@ Crie `Data-Science-Ia/.env` com base no `.env.example` e informe a string do Azu
 
 ```env
 AZURE_SQL_CONNECTIONSTRING="Server=tcp:seu-servidor.database.windows.net,1433;Database=seu_banco;UID=seu_usuario;PWD=sua_senha;Encrypt=yes;TrustServerCertificate=no"
+MOCK_API="http://127.0.0.1:8000"
 ```
 
 Nao use `DB_HOST`, `DB_PORT`, `DB_USER` ou `DB_PASSWORD`: essas variaveis pertencem a uma configuracao PostgreSQL e nao sao lidas pelo codigo atual.
@@ -58,13 +59,32 @@ Execute o script de criação das tabelas:
 python src/database/criar_tabelas.py
 ```
 
-## 5. Executar a aplicação
+## 5. Iniciar a API de ingestao
 
-```bash
-python src/main.py
+A API disponibiliza o arquivo `src/api/data_set.json` no endpoint:
+
+```text
+GET http://127.0.0.1:8000/api/v1/data-set
 ```
 
-## 6. Verificar resultados
+Inicie o servidor com:
+
+```bash
+python -m uvicorn src.api.app:app --reload
+```
+
+O endpoint de verificacao fica em `GET /health`.
+
+## 6. Executar a aplicação
+
+```bash
+python main.py
+```
+
+Com `MOCK_API` configurado, a ingestao consulta a API. Sem essa variavel, o
+pipeline usa o mesmo arquivo local da camada de API como fallback.
+
+## 7. Verificar resultados
 
 O fluxo deve:
 

@@ -1,6 +1,4 @@
-import json
 from os import getenv
-from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
@@ -158,15 +156,14 @@ def importar_leituras(dados):
 
 def importar_dados():
     try:
-        path_dados = Path(__file__).resolve().parent / "data_set.json"
-
         if BASE_URL is None or not BASE_URL.strip():
-            with path_dados.open(encoding="utf-8") as arquivo:
-                dados = json.load(arquivo)
-        else:
-            resposta = requests.get(f"{BASE_URL}/data-set", timeout=30)
-            resposta.raise_for_status()
-            dados = resposta.json()
+            raise ValueError("A variável MOCK_API deve estar configurada.")
+
+        resposta = requests.get(
+            f"{BASE_URL.rstrip('/')}/api/v1/data-set", timeout=30
+        )
+        resposta.raise_for_status()
+        dados = resposta.json()
 
         importar_cidades(dados)
         importar_operadores(dados)
