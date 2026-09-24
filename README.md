@@ -4,7 +4,7 @@
 
 Este projeto tem como objetivo coletar, validar, persistir e analisar dados ambientais de estações de monitoramento. O fluxo principal do sistema segue uma arquitetura em camadas, com foco em separar responsabilidades entre configuração, domínio, persistência e análise.
 
-A solução foi pensada para trabalhar com dados de API REST ou arquivos JSON simulados, armazenando registros em banco relacional e gerando estatísticas úteis para identificação de padrões e outliers.
+A solução trabalha com dados obtidos exclusivamente por uma API REST, armazenando registros em banco relacional e gerando estatísticas úteis para identificação de padrões e outliers.
 
 ## Fluxo principal
 

@@ -7,9 +7,8 @@ from dotenv import load_dotenv
 
 @dataclass(frozen=True)
 class Settings:
-    mock_api: str | None
+    mock_api: str
     azure_sql_connectionstring: str
-    dataset_path: Path
 
 
 def load_config() -> Settings:
@@ -20,11 +19,11 @@ def load_config() -> Settings:
     if not connection_string:
         raise ValueError("A variável AZURE_SQL_CONNECTIONSTRING deve estar configurada.")
 
-    mock_api = os.getenv("MOCK_API", "").strip() or None
-    dataset_path = Path(__file__).resolve().parent / "api" / "data_set.json"
+    mock_api = os.getenv("MOCK_API", "").strip()
+    if not mock_api:
+        raise ValueError("A variável MOCK_API deve estar configurada.")
 
     return Settings(
         mock_api=mock_api,
         azure_sql_connectionstring=connection_string,
-        dataset_path=dataset_path,
     )

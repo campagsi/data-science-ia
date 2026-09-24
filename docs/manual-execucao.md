@@ -61,7 +61,7 @@ python src/database/criar_tabelas.py
 
 ## 5. Iniciar a API de ingestao
 
-A API disponibiliza o arquivo `src/api/data_set.json` no endpoint:
+A API disponibiliza o dataset no endpoint:
 
 ```text
 GET http://127.0.0.1:8000/api/v1/data-set
@@ -81,8 +81,8 @@ O endpoint de verificacao fica em `GET /health`.
 python main.py
 ```
 
-Com `MOCK_API` configurado, a ingestao consulta a API. Sem essa variavel, o
-pipeline usa o mesmo arquivo local da camada de API como fallback.
+O pipeline consulta exclusivamente a API configurada em `MOCK_API`. Essa
+variavel e obrigatoria; sem ela, a configuracao falha antes da ingestao.
 
 ## 7. Verificar resultados
 
