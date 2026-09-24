@@ -1,7 +1,7 @@
 from datetime import date
 
 from src.database.connection import DatabaseConnection
-from src.models.operador_model import OperadorModel
+from src.models.leitura_model import LeituraModel
 
 
 class LeituraRepository:
@@ -220,13 +220,45 @@ class LeituraRepository:
         query = f"INSERT INTO cidades (codigo, nome, tipo, cidade_id) VALUES ('{nome}', '{estado}')"
         return self.__database.execute(query)
 
-    def create_many(self, operadores: list[OperadorModel]):
-        query = (
-            "INSERT INTO operadores (codigo, nome, tipo, cidade_id) VALUES (?, ?, ?, ?)"
-        )
+    def create_many(self, leituras: list[LeituraModel]):
+        query = """
+            INSERT INTO Leituras (
+                estacao_id,
+                data_hora,
+                temperatura,
+                umidade,
+                pressao,
+                precipitacao,
+                velocidade_vento,
+                direcao_vento,
+                radiacao_solar,
+                temperatura_agua,
+                ph,
+                oxigenio_dissolvido,
+                condutividade,
+                turbidez,
+                fonte
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
         params = [
-            (operador.codigo, operador.nome, operador.tipo, operador.cidade_id)
-            for operador in operadores
+            (
+                leitura.estacao_id,
+                leitura.data_hora,
+                leitura.temperatura,
+                leitura.umidade,
+                leitura.pressao,
+                leitura.precipitacao,
+                leitura.velocidade_vento,
+                leitura.direcao_vento,
+                leitura.radiacao_solar,
+                leitura.temperatura_agua,
+                leitura.ph,
+                leitura.oxigenio_dissolvido,
+                leitura.condutividade,
+                leitura.turbidez,
+                leitura.fonte,
+            )
+            for leitura in leituras
         ]
 
         return self.__database.execute_many(query, params)

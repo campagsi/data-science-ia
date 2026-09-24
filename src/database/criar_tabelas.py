@@ -67,6 +67,11 @@ def __criar_tabela_estacoes():
                         REFERENCES Operadores(id)
                 );
             END;
+
+            IF COL_LENGTH('dbo.Leituras', 'fonte') IS NULL
+            BEGIN
+                ALTER TABLE Leituras ADD fonte VARCHAR(100) NULL;
+            END;
         """
     database.execute(query)
 
@@ -94,6 +99,7 @@ def __criar_tabela_leituras():
                     oxigenio_dissolvido FLOAT,
                     condutividade FLOAT,
                     turbidez FLOAT,
+                    fonte VARCHAR(100) NOT NULL,
 
                     CONSTRAINT FK_Leituras_Estacoes FOREIGN KEY(estacao_id)
                         REFERENCES Estacoes(id)
