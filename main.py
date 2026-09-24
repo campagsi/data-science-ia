@@ -7,12 +7,7 @@ import pandas as pd
 from src.config import load_config
 from src.database.criar_tabelas import criar_tabelas
 from src.ingestion.data_client import DataClient
-from src.ingestion.importar_dados import (
-    importar_cidades,
-    importar_estacoes,
-    importar_leituras,
-    importar_operadores,
-)
+from src.repository.leitura_repository import LeituraRepository
 from src.services.analytics_service import AnaliticsService
 from src.services.normalization_service import NormalizationService
 from src.services.report_service import ReportService
@@ -26,10 +21,7 @@ def run_pipeline() -> dict[str, Any]:
     validated_data = ValidationService().validate_data(normalized_data)
 
     criar_tabelas()
-    importar_cidades(validated_data)
-    importar_operadores(validated_data)
-    importar_estacoes(validated_data)
-    importar_leituras(validated_data)
+    LeituraRepository().save_readings(validated_data)
 
     service = AnaliticsService()
     indicadores = service.calculate_metrics(

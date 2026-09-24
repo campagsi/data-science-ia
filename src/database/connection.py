@@ -13,6 +13,10 @@ class DatabaseConnection:
         if not self.__connection_string:
             raise ValueError("A string de conexão não foi preenchida corretamente.")
 
+    def connect(self):
+        """Abre uma conexão para a unidade de persistência."""
+        return connect(self.__connection_string)
+
     def execute(self, sql: str, params: tuple = ()) -> int:
         """
         Executa INSERT, UPDATE ou DELETE.

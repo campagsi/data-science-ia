@@ -45,6 +45,8 @@ def importar_operadores(dados):
 
             if nome not in __cidades:
                 cidade = CidadeRepository().get_by_name(nome)
+                if cidade is None:
+                    raise ValueError(f"Cidade não encontrada: {nome}")
                 __cidades[nome] = cidade
 
             cidade_id = __cidades[nome]["id"]
@@ -75,10 +77,14 @@ def importar_estacoes(dados):
         for item in dados:
             if item["cidade_nome"] not in __cidades:
                 cidade = CidadeRepository().get_by_name(item["cidade_nome"])
+                if cidade is None:
+                    raise ValueError(f"Cidade não encontrada: {item['cidade_nome']}")
                 __cidades[item["cidade_nome"]] = cidade
 
             if item["operador_codigo"] not in __operadores:
                 operador = OperadorRepository().get_by_name(item["operador_nome"])
+                if operador is None:
+                    raise ValueError(f"Operador não encontrado: {item['operador_nome']}")
                 __operadores[item["operador_codigo"]] = operador
 
             cidade_id = __cidades[item["cidade_nome"]]["id"]
@@ -116,6 +122,8 @@ def importar_leituras(dados):
 
             if codigo not in __estacoes:
                 estacao = EstacaoRepository().get_by_codigo(codigo)
+                if estacao is None:
+                    raise ValueError(f"Estação não encontrada: {codigo}")
                 __estacoes[codigo] = estacao
 
             estacaoID = __estacoes[codigo]["id"]

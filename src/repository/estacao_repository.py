@@ -102,3 +102,7 @@ class EstacaoRepository:
         ]
 
         return self.__database.execute_many(query, params)
+
+    def insert_estacao(self, estacoes: list[EstacaoModel]):
+        """Método-ponte para a operação de inserção de estações."""
+        return self.create_many(estacoes)

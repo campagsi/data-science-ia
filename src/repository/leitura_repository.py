@@ -262,3 +262,29 @@ class LeituraRepository:
         ]
 
         return self.__database.execute_many(query, params)
+
+    def insert_leituras(self, leituras: list[LeituraModel]):
+        """Método-ponte para a operação de inserção de leituras."""
+        return self.create_many(leituras)
+
+    def save_readings(self, registros_ok: list[dict]) -> dict[str, int]:
+        """Coordena a persistência das entidades na ordem de dependência."""
+        from src.ingestion.importar_dados import (
+            importar_cidades,
+            importar_estacoes,
+            importar_leituras,
+            importar_operadores,
+            __dict__ as ingestion_state,
+        )
+
+        for cache_name in ("__cidades", "__operadores", "__estacoes"):
+            cache = ingestion_state.get(cache_name)
+            if isinstance(cache, dict):
+                cache.clear()
+
+        importar_cidades(registros_ok)
+        importar_operadores(registros_ok)
+        importar_estacoes(registros_ok)
+        importar_leituras(registros_ok)
+
+        return {"registros": len(registros_ok)}
