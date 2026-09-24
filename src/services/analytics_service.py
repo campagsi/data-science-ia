@@ -77,7 +77,7 @@ class AnaliticsService:
         self.__estacao_repository = EstacaoRepository()
 
     def __preparar_dataframe(self, dados: list[dict], tipo=str) -> pd.DataFrame:
-        df = pd.DataFrame(dados)
+        df = pd.DataFrame(dados or [])
 
         if df.empty:
             return df
@@ -277,3 +277,46 @@ class AnaliticsService:
     def bucar_cidades(self):
         result = self.__cidade_repository.get_all()
         return result
+
+    def calculate_metrics(
+        self,
+        cidade_id: int | None = None,
+        estacao_id: int | None = None,
+        data_inicio: date | None = None,
+        data_fim: date | None = None,
+    ) -> dict:
+        """Consolida as análises existentes por cidade ou por estação."""
+        if cidade_id is None and estacao_id is None:
+            raise ValueError("Informe cidade_id ou estacao_id para calcular as métricas.")
+        if cidade_id is not None and estacao_id is not None:
+            raise ValueError("Informe somente um escopo de análise.")
+
+        if cidade_id is not None:
+            analise_meteorologica = self.analisar_leituras_meteriologicas_cidade(
+                cidade_id, data_inicio, data_fim
+            )
+            analise_qualidade_agua = self.analisar_leituras_qualidade_agua_cidade(
+                cidade_id, data_inicio, data_fim
+            )
+            escopo = {"cidade_id": cidade_id}
+        else:
+            analise_meteorologica = self.analisar_leituras_meteriologicas_estacao(
+                estacao_id, data_inicio, data_fim
+            )
+            analise_qualidade_agua = self.analisar_leituras_qualidade_agua_estacao(
+                estacao_id, data_inicio, data_fim
+            )
+            escopo = {"estacao_id": estacao_id}
+
+        return {
+            "escopo": escopo,
+            "periodo": {"data_inicio": data_inicio, "data_fim": data_fim},
+            "meteorologica": {
+                "analise": analise_meteorologica[0],
+                "outliers": analise_meteorologica[1],
+            },
+            "qualidade_agua": {
+                "analise": analise_qualidade_agua[0],
+                "outliers": analise_qualidade_agua[1],
+            },
+        }

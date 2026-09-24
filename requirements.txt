@@ -1,4 +1,8 @@
 pydantic
 python-dotenv
 mssql-python
+fastapi
+uvicorn
+requests
+pandas
 

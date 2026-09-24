@@ -1,7 +1,5 @@
-from os import getenv
-
-import requests
-from dotenv import load_dotenv
+from src.config import load_config
+from src.ingestion.data_client import DataClient
 from pydantic import ValidationError
 
 from src.models import CidadeModel, EstacaoModel, LeituraModel, OperadorModel
@@ -11,11 +9,6 @@ from src.repository import (
     LeituraRepository,
     OperadorRepository,
 )
-
-# Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
-
-BASE_URL = getenv("MOCK_API")
 
 __cidades = {}
 __operadores = {}
@@ -155,25 +148,17 @@ def importar_leituras(dados):
 
 
 def importar_dados():
-    try:
-        if BASE_URL is None or not BASE_URL.strip():
-            raise ValueError("A variável MOCK_API deve estar configurada.")
+    """Mantém a fachada legada de importação usando a coleta desacoplada."""
+    settings = load_config()
+    dados = DataClient(settings).fetch_data()
 
-        resposta = requests.get(
-            f"{BASE_URL.rstrip('/')}/api/v1/data-set", timeout=30
-        )
-        resposta.raise_for_status()
-        dados = resposta.json()
-
-        importar_cidades(dados)
-        importar_operadores(dados)
-        importar_estacoes(dados)
-        importar_leituras(dados)
-
-    except requests.ConnectionError as error:
-        raise requests.ConnectionError(f"Falha ao se conectar: {error}") from error
-    except BaseException as error:
-        raise RuntimeError(f"Falha ao importar Estações: {error}") from error
+    __cidades.clear()
+    __operadores.clear()
+    __estacoes.clear()
+    importar_cidades(dados)
+    importar_operadores(dados)
+    importar_estacoes(dados)
+    importar_leituras(dados)
 
 
 if __name__ == "__main__":
