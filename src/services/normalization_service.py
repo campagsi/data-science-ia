@@ -33,8 +33,14 @@ class NormalizationService:
 
     def normalize(self, raw_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Padroniza os campos sem alterar o payload recebido."""
+        if not isinstance(raw_data, list):
+            raise ValueError("Os dados brutos devem ser uma lista de registros.")
+
         normalized_data = []
         for index, record in enumerate(raw_data):
+            if not isinstance(record, dict):
+                raise ValueError(f"Registro {index}: deve ser um objeto JSON.")
+
             normalized = dict(record)
 
             for field in self._TEXT_FIELDS:
@@ -42,7 +48,10 @@ class NormalizationService:
                     normalized[field] = str(normalized[field]).strip()
 
             for field in self._FLOAT_FIELDS:
-                if field in normalized and normalized[field] not in (None, ""):
+                if field in normalized and isinstance(normalized[field], str):
+                    normalized[field] = normalized[field].strip() or None
+
+                if field in normalized and normalized[field] is not None:
                     try:
                         normalized[field] = float(normalized[field])
                     except (TypeError, ValueError) as error:
@@ -64,7 +73,7 @@ class NormalizationService:
                         f"Registro {index}: campo data_hora deve ser uma data ISO válida."
                     ) from error
 
-            if "cidade_estado" in normalized:
+            if normalized.get("cidade_estado") is not None:
                 normalized["cidade_estado"] = normalized["cidade_estado"].upper()
 
             normalized_data.append(normalized)

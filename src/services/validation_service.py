@@ -1,3 +1,4 @@
+import math
 from typing import Any
 
 from pydantic import ValidationError
@@ -12,10 +13,26 @@ class ValidationService:
         "operador_codigo",
         "operador_nome",
         "operador_tipo",
+        "operador_ativo",
         "estacao_codigo",
         "estacao_nome",
+        "estacao_latitude",
+        "estacao_longitude",
+        "estacao_ativa",
         "estacao_tipo",
         "data_hora",
+        "temperatura",
+        "umidade",
+        "pressao",
+        "precipitacao",
+        "velocidade_vento",
+        "direcao_vento",
+        "radiacao_solar",
+        "temperatura_agua",
+        "ph",
+        "oxigenio_dissolvido",
+        "condutividade",
+        "turbidez",
         "fonte",
     )
 
@@ -23,11 +40,17 @@ class ValidationService:
         """Valida o lote inteiro antes de permitir qualquer persistência."""
         validated_data = []
         errors = []
+        operator_codes = {}
+        station_codes = {}
 
         for index, record in enumerate(normalized_data):
             try:
                 self.__validate_required_fields(record, index)
                 self.__validate_models(record)
+                self.__validate_ranges(record)
+                self.__validate_batch_uniqueness(
+                    record, operator_codes, station_codes
+                )
                 validated_data.append(dict(record))
             except (KeyError, TypeError, ValueError, ValidationError) as error:
                 errors.append(f"Registro {index}: {error}")
@@ -66,14 +89,74 @@ class ValidationService:
         missing = [
             field
             for field in self._REQUIRED_FIELDS
-            if field not in record or record[field] in (None, "")
+            if field not in record
+            or record[field] is None
+            or (isinstance(record[field], str) and not record[field].strip())
         ]
         if missing:
             raise ValueError(f"campos obrigatórios ausentes: {', '.join(missing)}")
 
-        for field in ("estacao_latitude", "estacao_longitude"):
-            if field not in record:
-                raise ValueError(f"campo obrigatório ausente: {field}")
+        if not isinstance(record["cidade_estado"], str):
+            raise ValueError("cidade_estado deve ser uma sigla de duas letras.")
+        if len(record["cidade_estado"]) != 2 or not record["cidade_estado"].isalpha():
+            raise ValueError("cidade_estado deve ser uma sigla de duas letras.")
+
+    def __validate_ranges(self, record: dict[str, Any]) -> None:
+        ranges = {
+            "estacao_latitude": (-90, 90),
+            "estacao_longitude": (-180, 180),
+            "umidade": (0, 100),
+            "direcao_vento": (0, 360),
+            "ph": (0, 14),
+        }
+        non_negative_fields = (
+            "precipitacao",
+            "radiacao_solar",
+            "oxigenio_dissolvido",
+            "condutividade",
+            "turbidez",
+        )
+
+        for field, (minimum, maximum) in ranges.items():
+            value = record[field]
+            if not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f"{field} deve ser numérico e finito.")
+            if not minimum <= value <= maximum:
+                raise ValueError(f"{field} deve estar entre {minimum} e {maximum}.")
+
+        for field in non_negative_fields:
+            value = record[field]
+            if not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f"{field} deve ser numérico e finito.")
+            if value < 0:
+                raise ValueError(f"{field} não pode ser negativo.")
+
+    @staticmethod
+    def __validate_batch_uniqueness(
+        record: dict[str, Any], operator_codes: dict, station_codes: dict
+    ) -> None:
+        operator_code = record["operador_codigo"]
+        station_code = record["estacao_codigo"]
+        operator_identity = (
+            record["operador_nome"],
+            record["operador_tipo"],
+            record["cidade_nome"],
+        )
+        station_identity = (
+            record["estacao_nome"],
+            record["estacao_latitude"],
+            record["estacao_longitude"],
+            record["cidade_nome"],
+            record["operador_codigo"],
+        )
+
+        if operator_code in operator_codes and operator_codes[operator_code] != operator_identity:
+            raise ValueError(f"operador_codigo duplicado no lote: {operator_code}.")
+        if station_code in station_codes and station_codes[station_code] != station_identity:
+            raise ValueError(f"estacao_codigo duplicado no lote: {station_code}.")
+
+        operator_codes[operator_code] = operator_identity
+        station_codes[station_code] = station_identity
 
     def __validate_models(self, record: dict[str, Any]) -> None:
         CidadeModel(nome=record["cidade_nome"], estado=record["cidade_estado"])

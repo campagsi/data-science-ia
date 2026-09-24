@@ -147,22 +147,12 @@ def importar_leituras(dados):
         raise RuntimeError(f"Falha ao importar Estações: {error}") from error
 
 
-def importar_dados():
-    """Mantém a fachada legada de importação usando a coleta desacoplada."""
+def importar_dados() -> list[dict]:
+    """Mantém a fachada pública de ingestão sem executar persistência."""
     settings = load_config()
-    dados = DataClient(settings).fetch_data()
-
-    __cidades.clear()
-    __operadores.clear()
-    __estacoes.clear()
-    importar_cidades(dados)
-    importar_operadores(dados)
-    importar_estacoes(dados)
-    importar_leituras(dados)
+    return DataClient(settings).fetch_data()
 
 
 if __name__ == "__main__":
-    try:
-        importar_dados()
-    except (requests.ConnectionError, ValueError, RuntimeError) as error:
-        print(error)
+    dados = importar_dados()
+    print(f"Dados recebidos da API: {len(dados)} registros.")
