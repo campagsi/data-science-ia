@@ -44,7 +44,7 @@ class LeituraRepository:
                 L.precipitacao,
                 L.velocidade_vento,
                 L.radiacao_solar,
-                L.data_hora
+                L.data_hora,
                 E.nome
                 FROM Leituras L
                 INNER JOIN Estacoes E ON L.estacao_id = E.id

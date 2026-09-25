@@ -182,7 +182,7 @@ class AnaliticsService:
         return (
             registros.loc[mascara, colunas_resultado]
             .sort_values(["Variável", "Data", "Valor"])
-            .reset_index(drop=True)
+            .to_dict(orient="records")
         )
 
     def analisar_leituras_meteriologicas_cidade(
@@ -270,8 +270,8 @@ class AnaliticsService:
 
         return estatisticas, outliers
 
-    def buscar_estacoes(self):
-        result = self.__estacao_repository.get_all()
+    def buscar_estacao_by_cidade_id(self, id: int):
+        result = self.__estacao_repository.get_estacao_cidade(id)
         return result
 
     def bucar_cidades(self):
