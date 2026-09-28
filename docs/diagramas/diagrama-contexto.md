@@ -1,6 +1,6 @@
 ```mermaid
 flowchart LR
-	Fonte[API REST ou JSON simulado] --> Ingestao[Ingestao]
+	Fonte[API REST com dataset simulado] --> Ingestao[Ingestao]
 	Ingestao --> Normalizacao[Normalizacao do payload]
 	Normalizacao --> Validacao[Validacao de contrato]
 	Validacao --> Banco[(Banco relacional)]
@@ -12,7 +12,7 @@ flowchart LR
 
 # Diagrama de contexto
 
-O sistema recebe registros ambientais de uma API REST ou de um arquivo JSON simulado. O payload bruto passa por normalização e validação antes de ser persistido. A análise consulta os dados por cidade, operador, estação, período e fonte para gerar o relatório final.
+O sistema recebe registros ambientais exclusivamente de uma API REST, que no ambiente atual disponibiliza um dataset simulado. O payload bruto passa por normalização e validação antes de ser persistido. A análise consulta os dados por cidade, operador, estação, período e fonte para gerar o relatório final.
 
 ## Entradas
 

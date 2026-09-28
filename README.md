@@ -4,7 +4,7 @@
 
 Este projeto tem como objetivo coletar, validar, persistir e analisar dados ambientais de estações de monitoramento. O fluxo principal do sistema segue uma arquitetura em camadas, com foco em separar responsabilidades entre configuração, domínio, persistência e análise.
 
-A solução foi pensada para trabalhar com dados de API REST ou arquivos JSON simulados, armazenando registros em banco relacional e gerando estatísticas úteis para identificação de padrões e outliers.
+A solução trabalha com dados obtidos exclusivamente por uma API REST, armazenando registros em banco relacional e gerando estatísticas úteis para identificação de padrões e outliers.
 
 ## Fluxo principal
 
@@ -43,28 +43,32 @@ A proposta do projeto é uma arquitetura em camadas, com as seguintes responsabi
 5. Orquestração da aplicação
    - execução do pipeline completo
 
-## Estrutura conceitual do projeto
+## Estrutura do projeto
 
 ```text
 Data-Science-Ia/
 ├── docs/
+│   ├── diagramas/              # atividade, contexto e sequência
+│   ├── analise-implementacao.md
 │   ├── arquitetura.md
-│   ├── diagrama-sequencia.md
+│   ├── contrato-dados.md
+│   ├── dicionario-dados.md
 │   ├── manual-execucao.md
-│   └── modelagem-banco.md
+│   ├── modelagem-banco.md
+│   └── ...
 ├── src/
-│   ├── database/
-│   ├── models/
-│   ├── repository/
-│   ├── services/
-│   ├── main.py
-│   ├── .env
-│   ├── .env.example
-│   └── requirements.txt
-├── README.md
-├── projeto_modulo_1.md
-├── estrutura.png
-└── .gitignore
+│   ├── api/                    # API FastAPI que disponibiliza o dataset
+│   ├── database/               # conexão, transação e criação do schema
+│   ├── ingestion/              # cliente da API e funções de importação
+│   ├── models/                 # modelos Pydantic das entidades
+│   ├── repository/             # acesso ao banco por entidade
+│   ├── services/               # normalização, validação, análise e relatório
+│   └── config.py               # carregamento das variáveis de ambiente
+├── main.py                     # orquestração do pipeline (run_pipeline)
+├── requirements.txt
+├── .env.example
+├── CLAUDE.md / COPILOT.md      # diretrizes de desenvolvimento e documentação
+└── README.md
 ```
 
 ## Documentação técnica
@@ -72,12 +76,16 @@ Data-Science-Ia/
 Esta visão geral está alinhada com os documentos detalhados do projeto:
 
 - [docs/arquitetura.md](docs/arquitetura.md) — arquitetura em camadas e organização dos módulos
-- [docs/diagrama-sequencia.md](docs/diagrama-sequencia.md) — comunicação e fluxo de execução entre classes
-- [docs/modelagem-banco.md](docs/modelagem-banco.md) — estrutura relacional do banco
+- [docs/diagramas/diagrama-sequencia.md](docs/diagramas/diagrama-sequencia.md) — comunicação e fluxo de execução entre classes
+- [docs/diagramas/diagrama-atividade.md](docs/diagramas/diagrama-atividade.md) — fluxo do processo e tratamento de falhas
+- [docs/diagramas/diagrama-contexto.md](docs/diagramas/diagrama-contexto.md) — entradas e saídas do sistema
+- [docs/modelagem-banco.md](docs/modelagem-banco.md) — estrutura relacional, restrições e idempotência
 - [docs/contrato-dados.md](docs/contrato-dados.md) — contrato do JSON de entrada e regras de normalização
 - [docs/dicionario-dados.md](docs/dicionario-dados.md) — tipos, unidades e regras dos campos
 - [docs/requisitos.md](docs/requisitos.md) — requisitos funcionais e regras de negócio
 - [docs/analise-estatistica.md](docs/analise-estatistica.md) — métricas, agrupamentos e outliers
+- [docs/analise-implementacao.md](docs/analise-implementacao.md) — plano de refatoração por fases e relatórios de implementação
+- [docs/plano-testes.md](docs/plano-testes.md) — estratégia e cenários de teste
 - [docs/seguranca-lgpd.md](docs/seguranca-lgpd.md) — tratamento de dados e credenciais
 - [docs/versionamento.md](docs/versionamento.md) — branches e evolução do contrato
 - [docs/manual-execucao.md](docs/manual-execucao.md) — instruções de execução
@@ -86,7 +94,7 @@ Esta visão geral está alinhada com os documentos detalhados do projeto:
 
 O projeto busca:
 
-- coletar dados ambientais em diferentes fontes
+- coletar dados ambientais pela API REST configurada
 - limpar e validar registros inconsistentes
 - persistir as informações em banco relacional
 - gerar consultas e estatísticas por estação, período e parâmetro

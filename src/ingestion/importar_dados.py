@@ -1,9 +1,6 @@
-import json
-from os import getenv
-from pathlib import Path
-
-import requests
-from dotenv import load_dotenv
+from src.config import load_config
+from src.database import DatabaseConnection
+from src.ingestion.data_client import DataClient
 from pydantic import ValidationError
 
 from src.models import CidadeModel, EstacaoModel, LeituraModel, OperadorModel
@@ -14,17 +11,12 @@ from src.repository import (
     OperadorRepository,
 )
 
-# Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
-
-BASE_URL = getenv("MOCK_API")
-
 __cidades = {}
 __operadores = {}
 __estacoes = {}
 
 
-def importar_cidades(dados):
+def importar_cidades(dados, database: DatabaseConnection | None = None):
     try:
         cidades_model_list: list[CidadeModel] = []
 
@@ -36,7 +28,7 @@ def importar_cidades(dados):
             if cidade_model not in cidades_model_list:
                 cidades_model_list.append(cidade_model)
 
-        CidadeRepository().create_many(cidades_model_list)
+        CidadeRepository(database).create_many(cidades_model_list)
     except ValidationError as error:
         raise ValueError(
             f"Dados inválidos na importação de Cidades: {error}"
@@ -45,7 +37,7 @@ def importar_cidades(dados):
         raise RuntimeError(f"Falha ao importar Cidades: {error}") from error
 
 
-def importar_operadores(dados):
+def importar_operadores(dados, database: DatabaseConnection | None = None):
     try:
         operadores_model_list: list[OperadorModel] = []
 
@@ -53,7 +45,9 @@ def importar_operadores(dados):
             nome = item["cidade_nome"]
 
             if nome not in __cidades:
-                cidade = CidadeRepository().get_by_name(nome)
+                cidade = CidadeRepository(database).get_by_name(nome)
+                if cidade is None:
+                    raise ValueError(f"Cidade não encontrada: {nome}")
                 __cidades[nome] = cidade
 
             cidade_id = __cidades[nome]["id"]
@@ -68,7 +62,7 @@ def importar_operadores(dados):
             if operador_model not in operadores_model_list:
                 operadores_model_list.append(operador_model)
 
-        OperadorRepository().create_many(operadores_model_list)
+        OperadorRepository(database).create_many(operadores_model_list)
     except ValidationError as error:
         raise ValueError(
             f"Dados inválidos na importação de Operadores: {error}"
@@ -77,17 +71,23 @@ def importar_operadores(dados):
         raise RuntimeError(f"Falha ao importar Operadores: {error}") from error
 
 
-def importar_estacoes(dados):
+def importar_estacoes(dados, database: DatabaseConnection | None = None):
     try:
         estacoes_model_list: list[EstacaoModel] = []
 
         for item in dados:
             if item["cidade_nome"] not in __cidades:
-                cidade = CidadeRepository().get_by_name(item["cidade_nome"])
+                cidade = CidadeRepository(database).get_by_name(item["cidade_nome"])
+                if cidade is None:
+                    raise ValueError(f"Cidade não encontrada: {item['cidade_nome']}")
                 __cidades[item["cidade_nome"]] = cidade
 
             if item["operador_codigo"] not in __operadores:
-                operador = OperadorRepository().get_by_name(item["operador_nome"])
+                operador = OperadorRepository(database).get_by_name(
+                    item["operador_nome"]
+                )
+                if operador is None:
+                    raise ValueError(f"Operador não encontrado: {item['operador_nome']}")
                 __operadores[item["operador_codigo"]] = operador
 
             cidade_id = __cidades[item["cidade_nome"]]["id"]
@@ -107,7 +107,7 @@ def importar_estacoes(dados):
             if estacao_model not in estacoes_model_list:
                 estacoes_model_list.append(estacao_model)
 
-        EstacaoRepository().create_many(estacoes_model_list)
+        EstacaoRepository(database).create_many(estacoes_model_list)
     except ValidationError as error:
         raise ValueError(
             f"Dados inválidos na importação de Estações: {error}"
@@ -116,7 +116,7 @@ def importar_estacoes(dados):
         raise RuntimeError(f"Falha ao importar Estações: {error}") from error
 
 
-def importar_leituras(dados):
+def importar_leituras(dados, database: DatabaseConnection | None = None):
     try:
         leituras_model_list: list[LeituraModel] = []
 
@@ -124,7 +124,9 @@ def importar_leituras(dados):
             codigo = item["estacao_codigo"]
 
             if codigo not in __estacoes:
-                estacao = EstacaoRepository().get_by_codigo(codigo)
+                estacao = EstacaoRepository(database).get_by_codigo(codigo)
+                if estacao is None:
+                    raise ValueError(f"Estação não encontrada: {codigo}")
                 __estacoes[codigo] = estacao
 
             estacaoID = __estacoes[codigo]["id"]
@@ -147,7 +149,7 @@ def importar_leituras(dados):
             )
             leituras_model_list.append(leitura_model)
 
-        LeituraRepository().create_many(leituras_model_list)
+        LeituraRepository(database).create_many(leituras_model_list)
     except ValidationError as error:
         raise ValueError(
             f"Dados inválidos na importação de Estações: {error}"
@@ -156,31 +158,12 @@ def importar_leituras(dados):
         raise RuntimeError(f"Falha ao importar Estações: {error}") from error
 
 
-def importar_dados():
-    try:
-        path_dados = Path(__file__).resolve().parent / "data_set.json"
-
-        if BASE_URL is None or not BASE_URL.strip():
-            with path_dados.open(encoding="utf-8") as arquivo:
-                dados = json.load(arquivo)
-        else:
-            resposta = requests.get(f"{BASE_URL}/data-set", timeout=30)
-            resposta.raise_for_status()
-            dados = resposta.json()
-
-        importar_cidades(dados)
-        importar_operadores(dados)
-        importar_estacoes(dados)
-        importar_leituras(dados)
-
-    except requests.ConnectionError as error:
-        raise requests.ConnectionError(f"Falha ao se conectar: {error}") from error
-    except BaseException as error:
-        raise RuntimeError(f"Falha ao importar Estações: {error}") from error
+def importar_dados() -> list[dict]:
+    """Mantém a fachada pública de ingestão sem executar persistência."""
+    settings = load_config()
+    return DataClient(settings).fetch_data()
 
 
 if __name__ == "__main__":
-    try:
-        importar_dados()
-    except (requests.ConnectionError, ValueError, RuntimeError) as error:
-        print(error)
+    dados = importar_dados()
+    print(f"Dados recebidos da API: {len(dados)} registros.")

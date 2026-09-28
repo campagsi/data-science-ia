@@ -3,8 +3,8 @@ from src.models.cidade_model import CidadeModel
 
 
 class CidadeRepository:
-    def __init__(self) -> None:
-        self.__database = DatabaseConnection()
+    def __init__(self, database: DatabaseConnection | None = None) -> None:
+        self.__database = database or DatabaseConnection()
 
     def get_by_id(self, cidadeID: int) -> dict:
         query = "SELECT * FROM cidades WHERE id = ?"

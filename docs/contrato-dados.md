@@ -18,13 +18,9 @@ O contrato cobre:
 
 ## 3. Origem dos dados
 
-Os dados podem vir de:
+O pipeline obtém os dados exclusivamente pela API REST configurada em `MOCK_API`, no endpoint `GET /api/v1/data-set`. No ambiente atual, essa API é o serviço FastAPI do projeto (`src/api`), que disponibiliza um dataset simulado.
 
-- API REST externa;
-- arquivo JSON local;
-- fonte simulada em ambiente de teste ou laboratório.
-
-Independentemente da origem, o sistema deve padronizar os dados para um formato interno consistente antes de persistir ou analisar.
+O sistema deve padronizar os dados para um formato interno consistente antes de persistir ou analisar.
 
 ## 4. Estrutura de entrada esperada
 
@@ -85,13 +81,12 @@ Os campos abaixo devem existir e ter valor válido:
 - `temperatura_agua`, `ph`, `oxigenio_dissolvido`
 - `condutividade`, `turbidez`
 - `fonte`
-- `ph`
-- `oxigenio_dissolvido`
-- `condutividade`
 
 ### 5.2 Campos opcionais
 
 O contrato atual não define campos opcionais. Qualquer ausência deve ser tratada como erro de validação até que um novo contrato seja aprovado.
+
+**Divergência conhecida:** o dataset simulado atual possui 82 registros (de 5.520) com alguma medição ausente, sendo 55 com string vazia e 27 sem a chave. Pelo contrato vigente, esses registros fazem a validação rejeitar o lote inteiro. A revisão do contrato está registrada como pendência em [analise-implementacao.md](analise-implementacao.md).
 
 ## 6. Regras de validação por campo
 
@@ -184,7 +179,7 @@ Cada entidade deve seguir as regras de integridade estabelecidas no modelo de da
 Quando a estrutura de entrada estiver inconsistente, o sistema deve:
 
 - registrar a falha;
-- rejeitar o registro ou blocar a persistência;
+- rejeitar o registro ou bloquear a persistência;
 - devolver uma mensagem clara de erro;
 - não armazenar dados incompletos sem validação.
 
@@ -194,7 +189,7 @@ Quando a estrutura de entrada estiver inconsistente, o sistema deve:
 2. Nenhuma estação pode existir sem cidade e operador válidos.
 3. Campos numéricos recebidos como texto devem ser convertidos e validados antes da persistência.
 4. Datas devem seguir padronização ISO 8601.
-5. Uma leitura deve ser idempotente para a combinação `estacao_codigo` e `data_hora`.
+5. Uma leitura deve ser idempotente para a combinação `estacao_codigo` e `data_hora`. O schema atual ainda não possui restrição de unicidade; ver [modelagem-banco.md](modelagem-banco.md).
 6. Dados sensíveis devem ser preservados apenas quando estritamente necessários.
 
 ## 12. Conclusão

@@ -70,7 +70,7 @@ Responsável pela lógica da aplicação e pela transformação dos dados entre 
 
 ### Funções principais
 
-- consumir dados de API ou arquivo JSON
+- consumir dados da API REST configurada
 - converter o payload bruto para o modelo interno
 - validar estrutura, campos obrigatórios e intervalos
 - limpar e padronizar dados
@@ -109,6 +109,7 @@ Responsável por armazenar e consultar os dados no banco.
 ### Funções
 
 - criar conexão com o banco
+- controlar a transação do lote (`DatabaseConnection.transaction()`)
 - criar tabelas
 - inserir registros
 - consultar dados por estação, cidade e período
@@ -128,6 +129,8 @@ Responsável por armazenar e consultar os dados no banco.
 - `operador_repository.py`
 
 Essa camada separa o acesso ao banco da lógica de negócio, o que é uma boa prática para manutenção e testes.
+
+Os repositórios recebem opcionalmente a `DatabaseConnection` que devem usar. Isso permite que `save_readings()` execute todos os inserts do lote na mesma transação, enquanto o uso isolado de um repositório continua abrindo sua própria conexão.
 
 ## 5. Camada de orquestração
 

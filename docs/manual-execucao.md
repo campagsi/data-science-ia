@@ -42,31 +42,57 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 
 ## 3. Configurar variáveis de ambiente
 
-Crie um arquivo `.env` com base no `.env.example` e defina valores como:
+Crie `Data-Science-Ia/.env` com base no `.env.example` e informe a string do Azure SQL:
 
 ```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=monitoramento
-DB_USER=postgres
-DB_PASSWORD=sua_senha
+AZURE_SQL_CONNECTIONSTRING="Server=tcp:seu-servidor.database.windows.net,1433;Database=seu_banco;UID=seu_usuario;PWD=sua_senha;Encrypt=yes;TrustServerCertificate=no"
+MOCK_API="http://127.0.0.1:8000"
 ```
+
+Nao use `DB_HOST`, `DB_PORT`, `DB_USER` ou `DB_PASSWORD`: essas variaveis pertencem a uma configuracao PostgreSQL e nao sao lidas pelo codigo atual.
 
 ## 4. Criar banco e tabelas
 
-Execute o script de criação das tabelas:
+O pipeline chama `criar_tabelas()` antes de persistir os dados; ele cria somente as tabelas que ainda não existem.
+
+Para **apagar e recriar** as tabelas, execute a partir da pasta `Data-Science-Ia`:
 
 ```bash
-python src/database/criar_tabelas.py
+python -m src.database.criar_tabelas
 ```
 
-## 5. Executar a aplicação
+Atenção:
+
+- a execução direta desse módulo chama `recriar_tabelas()` e apaga todos os dados;
+- em um banco sem tabelas, a criação falha porque `__criar_tabela_estacoes()` executa `ALTER TABLE Leituras` antes de a tabela `Leituras` existir (ver pendências da Fase 7 em [analise-implementacao.md](analise-implementacao.md));
+- o schema não possui restrições de unicidade: executar o pipeline novamente com o mesmo dataset duplica cidades, operadores, estações e leituras.
+
+## 5. Iniciar a API de ingestao
+
+A API disponibiliza o dataset no endpoint:
+
+```text
+GET http://127.0.0.1:8000/api/v1/data-set
+```
+
+Inicie o servidor com:
 
 ```bash
-python src/main.py
+python -m uvicorn src.api.app:app --reload
 ```
 
-## 6. Verificar resultados
+O endpoint de verificacao fica em `GET /health`.
+
+## 6. Executar a aplicação
+
+```bash
+python main.py
+```
+
+O pipeline consulta exclusivamente a API configurada em `MOCK_API`. Essa
+variavel e obrigatoria; sem ela, a configuracao falha antes da ingestao.
+
+## 7. Verificar resultados
 
 O fluxo deve:
 
