@@ -5,8 +5,8 @@ from src.models.leitura_model import LeituraModel
 
 
 class LeituraRepository:
-    def __init__(self) -> None:
-        self.__database = DatabaseConnection()
+    def __init__(self, database: DatabaseConnection | None = None) -> None:
+        self.__database = database or DatabaseConnection()
 
     def get_by_id(self, operadorID: int) -> dict:
         query = "SELECT * FROM operadores WHERE id = ?"
@@ -44,21 +44,22 @@ class LeituraRepository:
                 L.precipitacao,
                 L.velocidade_vento,
                 L.radiacao_solar,
-                L.data_hora
+                L.data_hora,
                 E.nome
                 FROM Leituras L
                 INNER JOIN Estacoes E ON L.estacao_id = E.id
                 WHERE E.cidade_id = ?               
             """
 
-        params = [cidade_id, data_inicio, data_fim]
+        params = [cidade_id]
 
         if data_inicio is not None and data_fim is None:
             query += " AND CAST(L.data_hora AS DATE) = ?"
-            # params.insert((data_inicio,))
+            params.append(data_inicio)
 
         if data_inicio is not None and data_fim is not None:
             query += " AND CAST(L.data_hora AS DATE) BETWEEN ? AND ?"
+            params.extend([data_inicio, data_fim])
 
         result = self.__database.fetch_all(query, params)
 
@@ -100,13 +101,15 @@ class LeituraRepository:
                             WHERE E.cidade_id = ?               
                         """
 
-        params = [estacao_id, data_inicio, data_fim]
+        params = [estacao_id]
 
         if data_inicio is not None and data_fim is None:
             query += " AND CAST(L.data_hora AS DATE) = ?"
+            params.append(data_inicio)
 
         if data_inicio is not None and data_fim is not None:
             query += " AND CAST(L.data_hora AS DATE) BETWEEN ? AND ?"
+            params.extend([data_inicio, data_fim])
 
         result = self.__database.fetch_all(query, params)
 
@@ -146,13 +149,15 @@ class LeituraRepository:
                     WHERE L.estacao_id = ?               
                 """
 
-        params = [estacao_id, data_inicio, data_fim]
+        params = [estacao_id]
 
         if data_inicio is not None and data_fim is None:
             query += " AND CAST(L.data_hora AS DATE) = ?"
+            params.append(data_inicio)
 
         if data_inicio is not None and data_fim is not None:
             query += " AND CAST(L.data_hora AS DATE) BETWEEN ? AND ?"
+            params.extend([data_inicio, data_fim])
 
         result = self.__database.fetch_all(query, params)
 
@@ -191,13 +196,15 @@ class LeituraRepository:
                     WHERE estacao_id = ?               
                 """
 
-        params = [estacao_id, data_inicio, data_fim]
+        params = [estacao_id]
 
         if data_inicio is not None and data_fim is None:
             query += " AND CAST(L.data_hora AS DATE) = ?"
+            params.append(data_inicio)
 
         if data_inicio is not None and data_fim is not None:
             query += " AND CAST(L.data_hora AS DATE) BETWEEN ? AND ?"
+            params.extend([data_inicio, data_fim])
 
         result = self.__database.fetch_all(query, params)
 
@@ -268,7 +275,12 @@ class LeituraRepository:
         return self.create_many(leituras)
 
     def save_readings(self, registros_ok: list[dict]) -> dict[str, int]:
-        """Coordena a persistência das entidades na ordem de dependência."""
+        """
+        Coordena a persistência das entidades na ordem de dependência.
+
+        Todas as etapas usam a mesma transação: se qualquer uma falhar, nada
+        do lote permanece gravado.
+        """
         from src.ingestion.importar_dados import (
             importar_cidades,
             importar_estacoes,
@@ -282,9 +294,10 @@ class LeituraRepository:
             if isinstance(cache, dict):
                 cache.clear()
 
-        importar_cidades(registros_ok)
-        importar_operadores(registros_ok)
-        importar_estacoes(registros_ok)
-        importar_leituras(registros_ok)
+        with self.__database.transaction() as database:
+            importar_cidades(registros_ok, database)
+            importar_operadores(registros_ok, database)
+            importar_estacoes(registros_ok, database)
+            importar_leituras(registros_ok, database)
 
         return {"registros": len(registros_ok)}

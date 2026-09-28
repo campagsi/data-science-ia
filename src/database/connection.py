@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from os import getenv
 from pathlib import Path
 
@@ -8,14 +9,48 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 class DatabaseConnection:
-    def __init__(self):
-        self.__connection_string = getenv("AZURE_SQL_CONNECTIONSTRING")
+    def __init__(self, connection_string: str | None = None):
+        self.__connection_string = connection_string or getenv(
+            "AZURE_SQL_CONNECTIONSTRING"
+        )
         if not self.__connection_string:
             raise ValueError("A string de conexão não foi preenchida corretamente.")
+
+        self.__transaction_connection = None
 
     def connect(self):
         """Abre uma conexão para a unidade de persistência."""
         return connect(self.__connection_string)
+
+    @contextmanager
+    def transaction(self):
+        """
+        Mantém uma única conexão aberta para todas as operações do bloco.
+
+        Ao final do bloco é feito commit; se qualquer operação falhar, é feito
+        rollback e nenhuma alteração do lote permanece no banco.
+        """
+        if self.__transaction_connection is not None:
+            raise RuntimeError("Já existe uma transação ativa nesta conexão.")
+
+        try:
+            with self.connect() as connection:
+                self.__transaction_connection = connection
+                yield self
+        finally:
+            self.__transaction_connection = None
+
+    @contextmanager
+    def __cursor(self):
+        """Usa a conexão da transação ativa ou abre uma conexão própria."""
+        if self.__transaction_connection is not None:
+            with self.__transaction_connection.cursor() as cursor:
+                yield cursor
+            return
+
+        # Fora de uma transação, a conexão faz commit ao sair sem erro.
+        with self.connect() as connection, connection.cursor() as cursor:
+            yield cursor
 
     def execute(self, sql: str, params: tuple = ()) -> int:
         """
@@ -24,14 +59,9 @@ class DatabaseConnection:
         Retorna a quantidade de registros afetados.
         """
         try:
-            with connect(self.__connection_string) as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(sql, params)
-                    affected_rows = cursor.rowcount
-
-                connection.commit()
-
-                return affected_rows
+            with self.__cursor() as cursor:
+                cursor.execute(sql, params)
+                return cursor.rowcount
 
         except Exception as error:
             raise RuntimeError(
@@ -49,14 +79,9 @@ class DatabaseConnection:
             return 0
 
         try:
-            with connect(self.__connection_string) as connection:
-                with connection.cursor() as cursor:
-                    cursor.executemany(sql, params)
-                    affected_rows = cursor.rowcount
-
-                connection.commit()
-
-                return affected_rows
+            with self.__cursor() as cursor:
+                cursor.executemany(sql, params)
+                return cursor.rowcount
 
         except Exception as error:
             raise RuntimeError(f"Erro ao executar operação em lote: {error}") from error
@@ -64,10 +89,7 @@ class DatabaseConnection:
     def fetch_one(self, sql: str, params: tuple = ()):
         """Executa um SELECT e retorna somente um registro."""
         try:
-            with (
-                connect(self.__connection_string) as connection,
-                connection.cursor() as cursor,
-            ):
+            with self.__cursor() as cursor:
                 cursor.execute(sql, params)
                 return cursor.fetchone()
 
@@ -77,10 +99,7 @@ class DatabaseConnection:
     def fetch_all(self, sql: str, params: list[tuple] | None = None) -> list:
         """Executa um SELECT e retorna todos os registros selecionados."""
         try:
-            with (
-                connect(self.__connection_string) as connection,
-                connection.cursor() as cursor,
-            ):
+            with self.__cursor() as cursor:
                 cursor.execute(sql, params or ())
                 return list(cursor.fetchall())
 

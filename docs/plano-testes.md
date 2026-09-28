@@ -1,6 +1,3 @@
-# docs/plano-testes.md`
-
-
 # Estratégia e Plano de Testes
 
 ## 1. Visão Geral
@@ -18,8 +15,8 @@ Focam no isolamento total da camada de lógica e regras puras de negócio:
 
 ### 2.2 Testes de Integração
 Validam a interoperabilidade segura com componentes de infraestrutura:
-* **Persistência Relacional:** Validação de transações em banco PostgreSQL isolado (ex: instâncias descartáveis em containers).
-* **Idempotência do Banco:** Tentativa de persistir tuplas duplicadas e verificar a aplicação correta da cláusula `ON CONFLICT`.
+* **Persistência Relacional:** Validação de transações em banco SQL Server isolado (ex: banco descartável em uma instância local do SQL Server Express).
+* **Idempotência do Banco:** Tentativa de persistir leituras duplicadas e verificar que nenhuma duplicidade é criada (depende das restrições de unicidade ainda não implementadas no schema).
 * **Rollback Transacional:** Forçar inconsistência no meio de um lote de leituras e validar a integridade transacional garantindo que nenhum item parcial seja gravado.
 
 ### 2.3 Testes de Contrato e Ingestão
@@ -44,7 +41,8 @@ Validam a interoperabilidade segura com componentes de infraestrutura:
 A meta estabelecida de cobertura de testes de lógica de negócio e validação é de **no mínimo 80%**. Os comandos de execução são:
 ```bash
 # Execução completa com relatório de cobertura
-# pytest --cov=environmental_pipeline tests/
+# pytest --cov=src tests/
 
 # Execução focada em testes unitários rápidos
 # pytest tests/unit/
+```

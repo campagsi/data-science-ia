@@ -53,11 +53,19 @@ Nao use `DB_HOST`, `DB_PORT`, `DB_USER` ou `DB_PASSWORD`: essas variaveis perten
 
 ## 4. Criar banco e tabelas
 
-Execute o script de criação das tabelas:
+O pipeline chama `criar_tabelas()` antes de persistir os dados; ele cria somente as tabelas que ainda não existem.
+
+Para **apagar e recriar** as tabelas, execute a partir da pasta `Data-Science-Ia`:
 
 ```bash
-python src/database/criar_tabelas.py
+python -m src.database.criar_tabelas
 ```
+
+Atenção:
+
+- a execução direta desse módulo chama `recriar_tabelas()` e apaga todos os dados;
+- em um banco sem tabelas, a criação falha porque `__criar_tabela_estacoes()` executa `ALTER TABLE Leituras` antes de a tabela `Leituras` existir (ver pendências da Fase 7 em [analise-implementacao.md](analise-implementacao.md));
+- o schema não possui restrições de unicidade: executar o pipeline novamente com o mesmo dataset duplica cidades, operadores, estações e leituras.
 
 ## 5. Iniciar a API de ingestao
 

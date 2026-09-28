@@ -3,6 +3,7 @@ from typing import ClassVar
 
 import pandas as pd
 
+from src.database import DatabaseConnection
 from src.repository import CidadeRepository, EstacaoRepository, LeituraRepository
 
 
@@ -16,7 +17,7 @@ class AnaliticsService:
         "Limite Superior",
     )
 
-    __COLUNAS: ClassVar[dict[str, dict[str, str]]] = {
+    __COLUNAS: ClassVar[dict[str, tuple[str, ...]]] = {
         "meteriologico": (
             "temperatura",
             "pressao",
@@ -71,10 +72,10 @@ class AnaliticsService:
         },
     }
 
-    def __init__(self) -> None:
-        self.__leitura_repository = LeituraRepository()
-        self.__cidade_repository = CidadeRepository()
-        self.__estacao_repository = EstacaoRepository()
+    def __init__(self, database: DatabaseConnection | None = None) -> None:
+        self.__leitura_repository = LeituraRepository(database)
+        self.__cidade_repository = CidadeRepository(database)
+        self.__estacao_repository = EstacaoRepository(database)
 
     def __preparar_dataframe(self, dados: list[dict], tipo=str) -> pd.DataFrame:
         df = pd.DataFrame(dados or [])
@@ -240,7 +241,6 @@ class AnaliticsService:
         )
 
         tipo = "meteriologico"
-        print(self.__UNIDADES[tipo])
 
         df = self.__preparar_dataframe(dados, tipo)
 

@@ -3,8 +3,8 @@ from src.models.estacao_model import EstacaoModel
 
 
 class EstacaoRepository:
-    def __init__(self) -> None:
-        self.__database = DatabaseConnection()
+    def __init__(self, database: DatabaseConnection | None = None) -> None:
+        self.__database = database or DatabaseConnection()
 
     def get_all(self) -> list:
         query = "SELECT id, codigo, nome, cidade_id, operador_id, latitude, longitude, ativa, tipo FROM estacoes"

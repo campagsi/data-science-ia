@@ -34,12 +34,17 @@ sequenceDiagram
     Leitura-->>Validator: leitura validada
     Validator-->>Main: registros_ok
 
+    Main->>DB: criar_tabelas()
+    Note over DB: Cria as tabelas que ainda não existem.
+
     Main->>Repository: save_readings(registros_ok)
     Repository->>DB: connect()
+    Note over Repository,DB: DatabaseConnection.transaction() mantém uma única conexão para todo o lote.
     DB-->>Repository: connection
     Repository->>DB: insert_estacao()
     Repository->>DB: insert_leituras()
     DB-->>Repository: commit_ok
+    Note over Repository,DB: Qualquer falha faz rollback do lote inteiro.
     Repository-->>Main: dados_persistidos
 
     Main->>Analytics: calculate_metrics()
@@ -60,7 +65,7 @@ sequenceDiagram
 O fluxo começa em `main.py`, executando o método `run_pipeline()`. Esse método chama `config.py` para carregar as configurações do ambiente por meio do método `load_config()`. A responsabilidade dessa etapa é preparar a aplicação corretamente antes do processamento.
 
 ### 2. `main.py` -> `data_client.py`
-A aplicação solicita dados ao cliente da fonte externa por meio do método `fetch_data()`. Esse módulo é responsável por buscar os registros em API ou em arquivo JSON e entregar os dados brutos.
+A aplicação solicita dados ao cliente da fonte externa por meio do método `fetch_data()`. Esse módulo é responsável por buscar os registros exclusivamente na API configurada em `MOCK_API` e entregar os dados brutos.
 
 ### 3. `normalization_service.py`
 
@@ -70,13 +75,17 @@ O serviço de normalização converte números e booleanos recebidos como string
 A validação é feita pelo serviço `validation_service.py`, usando métodos como `validate_data()`. Ele valida as entidades do domínio, como `Estacao` e `Leitura`, acessando métodos específicos como `validar_estacao()` e `validar_leitura()`. Esse passo garante que os dados tenham estrutura e tipos consistentes.
 
 ### 5. `leitura_repository.py` -> `database.py`
-Após a validação, os registros são enviados ao repositório `leitura_repository.py`, que executa `save_readings()`. Esse repositório acessa `database.py` para abrir a conexão com o banco e realizar operações como `insert_estacao()` e `insert_leituras()`. Esse processo persiste os dados em banco relacional.
+Após a validação, `main.py` chama `criar_tabelas()` para criar as tabelas que ainda não existem. Em seguida, os registros são enviados ao repositório `leitura_repository.py`, que executa `save_readings()`. Esse repositório abre uma transação em `DatabaseConnection` (`src/database/connection.py`) e grava, na mesma conexão, cidades, operadores, estações (`insert_estacao()`) e leituras (`insert_leituras()`). O commit ocorre somente ao final; qualquer falha desfaz o lote inteiro.
 
 ### 6. `analytics_service.py`
 Depois de salvar os dados, a análise é executada pelo serviço `analytics_service.py`, por meio do método `calculate_metrics()`. Esse serviço consulta o repositório por meio de `get_readings_by_station()` e aplica operações matemáticas como `media()`, `mediana()`, `desvio_padrao()` e `detectar_outliers()`.
 
+No código, `AnaliticsService.calculate_metrics()` recebe o escopo (`cidade_id` ou `estacao_id`) e o período, e usa a mesma conexão da persistência. A consulta `get_readings_by_station()` corresponde aos métodos `get_leituras_*_by_estacao()` e `get_leituras_*_by_cidade()` de `LeituraRepository`; média, mediana e desvio padrão são calculados em `__analisar_leituras()`, e os outliers pelo IQR em `__identificar_outliers()`. O resultado consolida os grupos meteorológico e de qualidade da água.
+
 ### 7. `report_service.py`
 Por fim, a geração de relatório fica sob responsabilidade do serviço `report_service.py`, cujo método `generate_report()` recebe os indicadores calculados e devolve uma saída final para o usuário.
+
+No código, `generate_report()` devolve o relatório estruturado (escopo, período, estatísticas e outliers de cada grupo), que é o retorno de `run_pipeline()`. Para exibição no console, `ReportService.format_report()` converte esse relatório em texto, impresso por `main.py`.
 
 ## Observação
 

@@ -11,7 +11,7 @@ O projeto é orientado a arquitetura em camadas e deve separar responsabilidades
 O sistema deve permitir que:
 
 - as configurações do ambiente sejam carregadas de forma segura;
-- os dados ambientais sejam coletados de fontes como API REST ou arquivos JSON;
+- os dados ambientais sejam coletados de uma API REST;
 - os registros sejam validados antes de entrar no banco;
 - os dados sejam salvos em estrutura relacional;
 - métricas estatísticas sejam calculadas por estação, período e parâmetro;
@@ -48,7 +48,7 @@ Critérios:
 - falhar com mensagem clara se alguma informação obrigatória estiver ausente.
 
 ### RF02 - Ingestão de dados
-O sistema deve consumir dados ambientais de uma fonte externa, como API REST ou arquivo JSON.
+O sistema deve consumir dados ambientais de uma API REST, configurada em `MOCK_API`.
 
 Critérios:
 - realizar a leitura dos dados em formato estruturado;

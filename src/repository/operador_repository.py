@@ -3,8 +3,8 @@ from src.models.operador_model import OperadorModel
 
 
 class OperadorRepository:
-    def __init__(self) -> None:
-        self.__database = DatabaseConnection()
+    def __init__(self, database: DatabaseConnection | None = None) -> None:
+        self.__database = database or DatabaseConnection()
 
     def get_by_id(self, operadorID: int) -> dict:
         query = "SELECT * FROM operadores WHERE id = ?"

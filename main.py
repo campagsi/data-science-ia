@@ -2,9 +2,8 @@ from datetime import date
 import sys
 from typing import Any
 
-import pandas as pd
-
 from src.config import load_config
+from src.database.connection import DatabaseConnection
 from src.database.criar_tabelas import criar_tabelas
 from src.ingestion.data_client import DataClient
 from src.repository.leitura_repository import LeituraRepository
@@ -20,10 +19,11 @@ def run_pipeline() -> dict[str, Any]:
     normalized_data = NormalizationService().normalize(raw_data)
     validated_data = ValidationService().validate_data(normalized_data)
 
+    database = DatabaseConnection(settings.azure_sql_connectionstring)
     criar_tabelas()
-    LeituraRepository().save_readings(validated_data)
+    LeituraRepository(database).save_readings(validated_data)
 
-    service = AnaliticsService()
+    service = AnaliticsService(database)
     indicadores = service.calculate_metrics(
         cidade_id=1,
         data_inicio=date(2026, 6, 1),
@@ -33,29 +33,10 @@ def run_pipeline() -> dict[str, Any]:
 
 
 def _exibir_resultados(resultados: dict[str, Any]) -> None:
-    """Exibe no console os resultados produzidos pelo pipeline."""
-    for grupo in resultados["grupos"].values():
-        analise = grupo["analise"]
-        outliers = pd.DataFrame(grupo["outliers"])
-
-        if analise["Estatísticas"]:
-            print(pd.DataFrame(analise["Estatísticas"]).to_string(index=False))
-        else:
-            print("Nenhuma leitura encontrada.")
-
-        if outliers.empty:
-            print("Nenhum outlier identificado pelo método IQR.")
-        else:
-            print(
-                outliers.round(
-                    {
-                        "valor": 2,
-                        "Valor": 2,
-                        "Limite Inferior": 2,
-                        "Limite Superior": 2,
-                    }
-                ).to_string(index=False)
-            )
+    """Exibe no console o relatório textual produzido pelo pipeline."""
+    texto = ReportService().format_report(resultados)
+    if texto:
+        print(texto)
 
 
 if __name__ == "__main__":

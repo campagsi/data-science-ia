@@ -377,8 +377,8 @@ http://127.0.0.1:8000/docs
 
 ## 10. Integracao com a ingestao
 
-O modulo `src/ingestion/importar_dados.py` usa a variavel `MOCK_API` para
-consultar a API:
+O pipeline carrega a variavel `MOCK_API` em `src/config.py` e a
+`DataClient` (`src/ingestion/data_client.py`) a usa para consultar a API:
 
 ```env
 MOCK_API="http://127.0.0.1:8000"
@@ -390,9 +390,9 @@ A ingestao monta a chamada para:
 {MOCK_API}/api/v1/data-set
 ```
 
-Se `MOCK_API` nao estiver configurada, o pipeline usa o arquivo local da
-camada de API como fallback. Dessa forma, a API pode ser executada
-separadamente, enquanto a ingestao continua testavel sem servidor HTTP.
+`MOCK_API` e obrigatoria: sem ela, `load_config()` falha antes da ingestao.
+O pipeline nao le o arquivo `data_set.json` diretamente; o arquivo e usado
+somente por esta API, que precisa estar em execucao durante o pipeline.
 
 ## 11. Principios de organizacao aplicados
 

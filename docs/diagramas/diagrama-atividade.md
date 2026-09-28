@@ -5,7 +5,7 @@ flowchart TD
 
 	credenciais -- Nao --> erro_config[Registrar erro sem expor credenciais]
 	erro_config --> fim_erro((Fim com erro))
-	credenciais -- Sim --> fonte[Consumir API REST ou arquivo JSON]
+	credenciais -- Sim --> fonte[Consumir API REST]
 
 	fonte --> carga{Carga recebida com sucesso?}
 	carga -- Nao --> registrar_falha[Registrar falha de ingestao]
@@ -92,7 +92,7 @@ Nesta fase os dados recebidos são tratados para remover ou corrigir:
 Se houver dados pessoais ou sensíveis, eles são removidos ou anonimizados antes de seguir para o armazenamento.
 
 ### 5. Persistência no banco
-Os dados válidos são salvos em banco para futura consulta e análise.
+Os dados válidos são salvos em banco para futura consulta e análise. Cidades, operadores, estações e leituras são gravados em uma única transação: se qualquer inserção falhar, nada do lote é gravado e o fluxo segue para o erro de persistência.
 
 ### 6. Análise estatística
 O sistema consulta os dados armazenados, calcula métricas e identifica padrões, como médias, desvios e valores atípicos.

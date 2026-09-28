@@ -137,3 +137,15 @@ Essa organização evita redundância de informações e facilita consultas por 
 - `Estacoes.codigo` deve ser único.
 - `Leituras` deve possuir uma restrição única para `estacao_id` e `data_hora`.
 - Os campos `latitude`, `longitude`, `ativa` e os valores ambientais devem ser persistidos após a normalização do JSON, nunca diretamente como texto bruto.
+
+## Situação atual do schema
+
+O schema criado por `src/database/criar_tabelas.py` ainda não implementa todo o modelo acima:
+
+- `Operadores` não possui a coluna `ativo`; o campo `operador_ativo` é validado, mas não é persistido;
+- `Operadores` possui `cidade_id` (chave estrangeira para `Cidades`), que não aparece no diagrama;
+- não há restrições `UNIQUE` em `Operadores.codigo`, `Estacoes.codigo` nem em `Leituras (estacao_id, data_hora)`; reprocessar um lote duplica os registros;
+- as colunas de cadastro e medição aceitam `NULL`, exceto `estacao_id`, `data_hora`, `fonte` e as chaves estrangeiras;
+- os textos usam `VARCHAR`, os valores numéricos `FLOAT` e `data_hora` usa `DATETIME`.
+
+A persistência de um lote ocorre em uma única transação (`DatabaseConnection.transaction()`): se qualquer inserção falhar, nada do lote é gravado.
