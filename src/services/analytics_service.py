@@ -240,7 +240,6 @@ class AnaliticsService:
         )
 
         tipo = "meteriologico"
-        print(self.__UNIDADES[tipo])
 
         df = self.__preparar_dataframe(dados, tipo)
 
@@ -274,6 +273,6 @@ class AnaliticsService:
         result = self.__estacao_repository.get_estacao_cidade(id)
         return result
 
-    def bucar_cidades(self):
+    def buscar_cidades(self):
         result = self.__cidade_repository.get_all()
         return result

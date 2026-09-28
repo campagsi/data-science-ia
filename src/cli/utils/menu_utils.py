@@ -9,19 +9,7 @@ class Utils:
     def __init__(self, menu_title=""):
         self.__menu_title = menu_title
 
-    def montar_painel(self, dados: list) -> Panel:
-        console = Console()
-        print(dados)
-        itens_menu = "\n".join(
-            f"{numero} - {item['nome']}" for numero, item in dados.items()
-        )
-        console.clear()
-        console.line(2)
-        console.print(
-            Panel(itens_menu, title=self.__menu_title, style="bold blue", expand=False)
-        )
-
-    def montar_tabela(self, dados: list[dict], title=str):
+    def montar_tabela(self, dados: list[dict], title=str) -> Table:
         tabela = Table(
             title=title,
             style="cyan bold",
@@ -49,9 +37,20 @@ class Utils:
 
         return tabela
 
-    def Validar_Data(self, data: str):
+    def Validar_Datas(self, dt_inicio: str, dt_fim: str):
         try:
-            datetime.strptime(data, "%d/%m/%Y")
-            return True
+            inicio = datetime.strptime(dt_inicio, "%d/%m/%Y")
+            fim = datetime.strptime(dt_fim, "%d/%m/%Y")
+
+            return {
+                "error": inicio > fim,
+                "mensagem": "A data início não pode ser maior que a data fim"
+                if inicio > fim
+                else "",
+            }
+
         except ValueError:
-            return False
+            return {
+                "error": True,
+                "mensagem": "Data inválida, informe a data no formato: dd/mm/yyyy",
+            }
