@@ -21,20 +21,10 @@ class ValidationService:
         "estacao_ativa",
         "estacao_tipo",
         "data_hora",
-        "temperatura",
-        "umidade",
-        "pressao",
-        "precipitacao",
-        "velocidade_vento",
-        "direcao_vento",
-        "radiacao_solar",
-        "temperatura_agua",
-        "ph",
-        "oxigenio_dissolvido",
-        "condutividade",
-        "turbidez",
         "fonte",
     )
+    # As medições não são obrigatórias: quando ausentes, são gravadas como NULL.
+    # Ref.: docs/contrato-dados.md, seção 5.2 (Campos opcionais).
 
     def validate_data(self, normalized_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Valida o lote inteiro antes de permitir qualquer persistência."""
@@ -118,14 +108,20 @@ class ValidationService:
         )
 
         for field, (minimum, maximum) in ranges.items():
-            value = record[field]
+            value = record.get(field)
+            # Medição ausente não tem faixa a conferir. Latitude e longitude
+            # nunca chegam nulas aqui, pois são exigidas em _REQUIRED_FIELDS.
+            if value is None:
+                continue
             if not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"{field} deve ser numérico e finito.")
             if not minimum <= value <= maximum:
                 raise ValueError(f"{field} deve estar entre {minimum} e {maximum}.")
 
         for field in non_negative_fields:
-            value = record[field]
+            value = record.get(field)
+            if value is None:
+                continue
             if not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"{field} deve ser numérico e finito.")
             if value < 0:

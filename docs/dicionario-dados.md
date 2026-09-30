@@ -19,24 +19,25 @@ O JSON de origem entrega todos os valores como texto. A coluna **Tipo interno** 
 | `estacao_ativa` | string | boolean | sim | somente `true` ou `false` |
 | `estacao_tipo` | string | string | sim | categoria da estação |
 | `data_hora` | string ISO 8601 | datetime | sim | data/hora sem fuso no payload atual |
-| `temperatura` | string decimal | decimal | sim | temperatura do ar, °C |
-| `umidade` | string decimal | decimal | sim | umidade relativa, % |
-| `pressao` | string decimal | decimal | sim | pressão atmosférica, hPa |
-| `precipitacao` | string decimal | decimal | sim | precipitação, unidade a confirmar |
-| `velocidade_vento` | string decimal | decimal | sim | unidade a confirmar na origem |
-| `direcao_vento` | string decimal | decimal | sim | direção, graus de 0 a 360 |
-| `radiacao_solar` | string decimal | decimal | sim | unidade a confirmar na origem |
-| `temperatura_agua` | string decimal | decimal | sim | temperatura da água, °C |
-| `ph` | string decimal | decimal | sim | escala de 0 a 14 |
-| `oxigenio_dissolvido` | string decimal | decimal | sim | unidade a confirmar na origem |
-| `condutividade` | string decimal | decimal | sim | unidade a confirmar na origem |
-| `turbidez` | string decimal | decimal | sim | unidade a confirmar na origem |
+| `temperatura` | string decimal | decimal | não | temperatura do ar, °C |
+| `umidade` | string decimal | decimal | não | umidade relativa, % |
+| `pressao` | string decimal | decimal | não | pressão atmosférica, hPa |
+| `precipitacao` | string decimal | decimal | não | precipitação, unidade a confirmar |
+| `velocidade_vento` | string decimal | decimal | não | unidade a confirmar na origem |
+| `direcao_vento` | string decimal | decimal | não | direção, graus de 0 a 360 |
+| `radiacao_solar` | string decimal | decimal | não | unidade a confirmar na origem |
+| `temperatura_agua` | string decimal | decimal | não | temperatura da água, °C |
+| `ph` | string decimal | decimal | não | escala de 0 a 14 |
+| `oxigenio_dissolvido` | string decimal | decimal | não | unidade a confirmar na origem |
+| `condutividade` | string decimal | decimal | não | unidade a confirmar na origem |
+| `turbidez` | string decimal | decimal | não | unidade a confirmar na origem |
 | `fonte` | string | string | sim | origem do registro, por exemplo `SIMULADO` |
 
 ## Regras de qualidade
 
 - Textos devem ser removidos de espaços nas extremidades.
 - Campos numéricos devem aceitar apenas representações decimais válidas.
+- Medições ausentes (sem a chave, `null` ou string vazia) são gravadas como `NULL`, sem estimativa.
 - Booleanos não devem ser convertidos por coerção genérica: valores diferentes de `true` e `false` devem ser rejeitados.
 - A data deve ser convertida para um tipo de data/hora e receber uma convenção de fuso definida pela aplicação.
 - A combinação `estacao_codigo` e `data_hora` deve ser única para impedir duplicidade de leituras.

@@ -103,6 +103,16 @@ O fluxo deve:
 - executar consultas e estatísticas
 - exibir o relatório final ou salvar os resultados
 
+## 8. Executar os testes
+
+Os testes não precisam da API em execução nem do banco do Azure. Com o ambiente virtual ativado, a partir da pasta `Data-Science-Ia`:
+
+```bash
+python -m pytest tests
+```
+
+Sem configuração adicional, os testes unitários são executados e os de integração são ignorados. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
+
 ## Estrutura executada
 
 A execução segue a seguinte ordem lógica:

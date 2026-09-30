@@ -620,6 +620,14 @@ class ValidationService:
 - conflito de identidade para o mesmo código de estação rejeitado;
 - compilação e diagnósticos do serviço concluídos sem erros.
 
+**Ajuste posterior (medições opcionais):**
+
+- motivo: o dataset da API tem 82 registros (de 5.520) com uma medição ausente, e a exigência de todas as medições fazia `validate_data()` rejeitar o lote inteiro (pendência da Fase 7);
+- as 12 medições foram retiradas de `_REQUIRED_FIELDS`; `__validate_ranges()` passou a ignorar medições nulas ou sem a chave. Medição informada continua sujeita aos intervalos do contrato, e a rejeição do lote inteiro por registro inválido foi mantida;
+- `LeituraModel`, `importar_leituras()` e as colunas de medição de `Leituras` já aceitavam nulos, então nenhuma outra camada foi alterada;
+- arquivos alterados: `src/services/validation_service.py`, [contrato-dados.md](contrato-dados.md), [dicionario-dados.md](dicionario-dados.md) e [arquitetura.md](arquitetura.md);
+- validação: o dataset atual passado por `normalize()` e `validate_data()` resultou em 5.520 registros válidos, sem rejeição do lote.
+
 ### Fase 6 - Organizar a persistência e os métodos-ponte do diagrama
 
 **Objetivo:** atender à sequência `save_readings() -> connect() -> insert_estacao() -> insert_leituras()` usando os repositórios existentes.
@@ -740,7 +748,7 @@ class LeituraRepository:
 - `criar_tabelas()` falha em banco vazio: `__criar_tabela_estacoes()` executa `ALTER TABLE Leituras` antes de `__criar_tabela_leituras()` criar a tabela. Em bancos com as tabelas já criadas, a execução funciona. Para o teste local, as tabelas foram criadas com um contorno no próprio script de teste;
 - sem restrições de unicidade, reprocessar o mesmo lote duplicou todos os registros (20 cidades, 50 operadores, 60 estações e 10.876 leituras);
 - `operador_ativo` continua sem coluna correspondente em `Operadores`;
-- o dataset da API contém 82 registros (de 5.520) com alguma medição ausente: 55 com string vazia e 27 sem a chave. Como o contrato exige todas as medições, `validate_data()` rejeita o lote inteiro e o pipeline completo não chega à persistência com o dataset atual. A decisão sobre o contrato altera a lógica da validação e está pendente de aprovação.
+- ~~o dataset da API contém 82 registros (de 5.520) com alguma medição ausente: 55 com string vazia e 27 sem a chave, e `validate_data()` rejeitava o lote inteiro.~~ Resolvida pelo ajuste posterior da Fase 5: as medições passaram a ser opcionais e são gravadas como `NULL`.
 
 ### Fase 8 - Criar o método de análise compatível com o diagrama
 
@@ -872,6 +880,29 @@ class ReportService:
 
 **Critério de revisão:** o pipeline completo executa na ordem do diagrama, os testes críticos passam e falhas produzem resultado não ambíguo.
 
+**Implementação realizada (testes):**
+
+- criada a pasta `tests/`, adicionada ao controle de versão, com testes unitários em `tests/unit` e de integração em `tests/integration`; a estrutura, o conteúdo de cada arquivo e o guia de execução estão na seção 4 de [plano-testes.md](plano-testes.md);
+- `pytest` e `pytest-cov` foram adicionados ao `requirements.txt`; `.pytest_cache`, `.coverage` e `htmlcov` foram adicionados ao `.gitignore`;
+- `tests/conftest.py` substitui `AZURE_SQL_CONNECTIONSTRING` e `MOCK_API` por valores de teste antes de qualquer import de `src`, para que nenhum teste acesse o banco real;
+- os testes de integração só rodam com `TEST_SQL_MASTER_CONNECTIONSTRING` configurada; cada sessão cria um banco descartável e o remove ao final;
+- itens 5 a 8 desta fase: atendidos pelos testes unitários (`load_config()`, `fetch_data()`, `normalize()`, `validate_data()`, `generate_report()`, métodos-ponte e orquestração) e de integração (ordem de persistência, rollback, consulta por período, idempotência e ponta a ponta);
+- item 4: atendido pelo `main.py` atual, que envia o erro para `stderr` e termina com código `1` (`test_execucao_com_falha_termina_com_codigo_1_sem_expor_segredo`);
+- itens 1 a 3: pendentes. O `main.py` atual não identifica a etapa em que a falha ocorreu; os testes verificam que o erro original é propagado e interrompe as etapas seguintes.
+
+**Validação executada:**
+
+- sem banco de teste: 58 testes aprovados e 7 de integração ignorados;
+- cobertura com `--cov=src --cov=main`: `config` 100%, `data_client` 100%, `report_service` 100%, `validation_service` 95%, `normalization_service` 94%, `analytics_service` 78%, `main.py` 76%; o total do projeto (64%) inclui repositórios e a API, não exercitados pelos testes unitários;
+- os testes de integração não foram executados nesta entrega, por falta de SQL Server de teste no ambiente.
+
+**Pendências encontradas:**
+
+- `importar_cidades()`, `importar_operadores()`, `importar_estacoes()` e `importar_leituras()` capturam `BaseException` (item 2); a correção altera o corpo dessas funções e depende de aprovação;
+- `criar_tabelas()` falha em banco vazio (pendência da Fase 7); o `tests/integration/conftest.py` cria o schema com um contorno, sem alterar o schema produzido;
+- `test_reprocessar_o_lote_nao_duplica_leituras` está marcado como `xfail` estrito até as restrições `UNIQUE` da Fase 7 serem criadas;
+- os cenários CT-01, CT-02 e CT-03 de [plano-testes.md](plano-testes.md) esperam comportamentos ainda não implementados (descarte individual com log, rejeição de data futura e `upsert`).
+
 ## 11. Ordem de dependência entre fases
 
 ```text
@@ -909,7 +940,7 @@ As Fases 6 e 7 dependem uma da outra na validação prática: o repository preci
 
 Antes de iniciar as alterações de código, a revisão deve decidir:
 
-1. Se a validação rejeitará o lote inteiro ou persistirá registros válidos e reportará inválidos. *Fase 5: rejeição do lote inteiro. Ver a pendência da Fase 7 sobre medições ausentes no dataset.*
+1. Se a validação rejeitará o lote inteiro ou persistirá registros válidos e reportará inválidos. *Fase 5: rejeição do lote inteiro quando algum registro é inválido; medições ausentes não invalidam o registro e são gravadas como `NULL`.*
 2. Se `cidade_id` ou `estacao_id` será o escopo padrão de `calculate_metrics()`. *Fase 8: o método não possui escopo padrão e exige um dos dois; `run_pipeline()` usa hoje `cidade_id=1` e o período de 01/06/2026 a 01/12/2026 fixos no código.*
 3. Se `ReportService.generate_report()` devolverá texto, dicionário ou ambos. *Fase 9: ambos; `generate_report()` devolve o dicionário e `format_report()` o texto.*
 4. Se a transação será implementada dentro de `DatabaseConnection` ou em um objeto de persistência específico. *Fase 7: `DatabaseConnection.transaction()`.*
