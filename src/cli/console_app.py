@@ -1,15 +1,20 @@
+import os
+
+import pandas as pd
 from rich.columns import Columns
 from rich.console import Console
 
 from src.cli.menus.painel_opcoes import exibir_painel
 from src.cli.utils.menu_utils import Utils
 from src.services.analytics_service import AnaliticsService
+from src.services.report_service import ReportService
 
 
 class Console_APP:
     def __init__(self) -> None:
         self.__analitics_service = AnaliticsService()
         self.__utils = Utils()
+        self.__report_service = ReportService()
 
     def run(self):
         console = Console()
@@ -174,6 +179,7 @@ class Console_APP:
                         continue
 
                     menu_selecionado["atual"] = "Consulta"
+                    menu_selecionado["error"] = ""
                 case "Consulta":
                     console.clear()
                     console.line(2)
@@ -194,14 +200,53 @@ class Console_APP:
                             )
                         )
 
-                    estatisticas = self.__utils.montar_tabela(
-                        analise["Estatísticas"], "Estatísticas"
-                    )
+                    if (
+                        isinstance(analise, dict)
+                        and analise.get("Estatísticas")
+                        and isinstance(outliers, list)
+                    ):
+                        estatisticas = self.__utils.montar_tabela(
+                            analise["Estatísticas"], "Estatísticas"
+                        )
 
-                    outlier = self.__utils.montar_tabela(outliers, "Outliers")
+                        outlier = self.__utils.montar_tabela(outliers, "Outliers")
 
-                    console.print(Columns([estatisticas, outlier], padding=(0, 2)))
-                    console.print("[bold yellow]Pressione 'Enter' para voltar.[/]")
-                    console.input()
-                    menu_selecionado["atual"] = "Cidades"
-                    continue
+                        console.print(Columns([estatisticas, outlier], padding=(0, 2)))
+                        console.print(
+                            "[bold yellow]Pressione '0' para salvar um relatório ou qualquer tecla para voltar ao início.[/]"
+                        )
+                        opcao_selecionada = console.input()
+                        if opcao_selecionada == "0":
+                            pasta = "relatorios"
+
+                            pd.DataFrame(analise["Estatísticas"]).to_csv(
+                                os.path.join(pasta, "estatisticas.csv"),
+                                index=False,
+                                sep=";",
+                                encoding="utf-8-sig",
+                            )
+
+                            pd.DataFrame(outliers).to_csv(
+                                os.path.join(pasta, "outliers.csv"),
+                                index=False,
+                                sep=";",
+                                encoding="utf-8-sig",
+                            )
+
+                        console.print(
+                            f"[bold green] Rellatório salvo em {os.path.join(pasta)}[/]"
+                        )
+
+                        console.print("Pressione qualquer tecla para voltar")
+                        console.input()
+
+                        menu_selecionado["atual"] = "Cidades"
+                        continue
+
+                    else:
+                        menu_selecionado["atual"] = "Selecao_Datas"
+                        menu_selecionado["anterior"] = "Estações"
+                        menu_selecionado["error"] = (
+                            "[bold red]Não há dados na data selecionada.[/]"
+                        )
+                        continue
