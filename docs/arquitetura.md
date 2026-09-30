@@ -100,7 +100,7 @@ O cliente de dados entrega o registro bruto com números e booleanos representad
 - `datetime` em `data_hora`;
 - textos limpos nos códigos, nomes, tipos e `fonte`.
 
-A validação ocorre depois dessa conversão. Registros que não possam ser convertidos ou que violem os intervalos do contrato devem ser rejeitados e registrados.
+A validação ocorre depois dessa conversão. Registros que não possam ser convertidos ou que violem os intervalos do contrato devem ser rejeitados e registrados. Medições ausentes não invalidam o registro e são gravadas como `NULL`.
 
 ## 4. Camada de persistência
 

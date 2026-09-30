@@ -64,6 +64,9 @@ Data-Science-Ia/
 │   ├── repository/             # acesso ao banco por entidade
 │   ├── services/               # normalização, validação, análise e relatório
 │   └── config.py               # carregamento das variáveis de ambiente
+├── tests/
+│   ├── unit/                   # testes sem banco e sem rede
+│   └── integration/            # SQL Server descartável; ignorados sem configuração
 ├── main.py                     # orquestração do pipeline (run_pipeline)
 ├── requirements.txt
 ├── .env.example
@@ -89,6 +92,16 @@ Esta visão geral está alinhada com os documentos detalhados do projeto:
 - [docs/seguranca-lgpd.md](docs/seguranca-lgpd.md) — tratamento de dados e credenciais
 - [docs/versionamento.md](docs/versionamento.md) — branches e evolução do contrato
 - [docs/manual-execucao.md](docs/manual-execucao.md) — instruções de execução
+
+## Testes
+
+Os testes usam `pytest` e ficam em `tests/`. Para executá-los, a partir da pasta `Data-Science-Ia`:
+
+```bash
+python -m pytest tests
+```
+
+Os testes unitários não dependem da API nem do banco. Os de integração só rodam com um SQL Server de teste configurado. O guia completo e a matriz de cenários estão em [docs/plano-testes.md](docs/plano-testes.md).
 
 ## Objetivo do sistema
 

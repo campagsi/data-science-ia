@@ -5,4 +5,5 @@ fastapi
 uvicorn
 requests
 pandas
-
+pytest
+pytest-cov

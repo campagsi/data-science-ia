@@ -76,17 +76,20 @@ Os campos abaixo devem existir e ter valor válido:
 - `estacao_ativa`
 - `estacao_tipo`
 - `data_hora`
-- `temperatura`, `umidade`, `pressao`, `precipitacao`
-- `velocidade_vento`, `direcao_vento`, `radiacao_solar`
-- `temperatura_agua`, `ph`, `oxigenio_dissolvido`
-- `condutividade`, `turbidez`
 - `fonte`
 
 ### 5.2 Campos opcionais
 
-O contrato atual não define campos opcionais. Qualquer ausência deve ser tratada como erro de validação até que um novo contrato seja aprovado.
+As medições são opcionais:
 
-**Divergência conhecida:** o dataset simulado atual possui 82 registros (de 5.520) com alguma medição ausente, sendo 55 com string vazia e 27 sem a chave. Pelo contrato vigente, esses registros fazem a validação rejeitar o lote inteiro. A revisão do contrato está registrada como pendência em [analise-implementacao.md](analise-implementacao.md).
+- `temperatura`, `umidade`, `pressao`, `precipitacao`
+- `velocidade_vento`, `direcao_vento`, `radiacao_solar`
+- `temperatura_agua`, `ph`, `oxigenio_dissolvido`
+- `condutividade`, `turbidez`
+
+Uma medição ausente (sem a chave, `null` ou string vazia) é gravada como `NULL`, sem estimativa. Quando informada, deve respeitar a regra da seção 6. As estatísticas desconsideram os nulos.
+
+O dataset simulado atual possui 82 registros (de 5.520) com uma medição ausente, sendo 55 com string vazia e 27 sem a chave. Esses registros são gravados com `NULL` no campo ausente.
 
 ## 6. Regras de validação por campo
 
@@ -105,18 +108,18 @@ O contrato atual não define campos opcionais. Qualquer ausência deve ser trata
 | estacao_ativa | string boolean | obrigatório, `true` ou `false` |
 | estacao_tipo | string | obrigatório |
 | data_hora | string ISO 8601 | obrigatório e deve representar data/hora válida |
-| temperatura | string decimal | obrigatório |
-| umidade | string decimal | obrigatório, entre 0 e 100 |
-| pressao | string decimal | obrigatório |
-| precipitacao | string decimal | obrigatório, maior ou igual a zero |
-| velocidade_vento | string decimal | obrigatório |
-| direcao_vento | string decimal | obrigatório, entre 0 e 360 |
-| radiacao_solar | string decimal | obrigatório, maior ou igual a zero |
-| temperatura_agua | string decimal | obrigatório |
-| ph | string decimal | obrigatório, entre 0 e 14 |
-| oxigenio_dissolvido | string decimal | obrigatório, maior ou igual a zero |
-| condutividade | string decimal | obrigatório, maior ou igual a zero |
-| turbidez | string decimal | obrigatório, maior ou igual a zero |
+| temperatura | string decimal | opcional |
+| umidade | string decimal | opcional; se informado, entre 0 e 100 |
+| pressao | string decimal | opcional |
+| precipitacao | string decimal | opcional; se informado, maior ou igual a zero |
+| velocidade_vento | string decimal | opcional |
+| direcao_vento | string decimal | opcional; se informado, entre 0 e 360 |
+| radiacao_solar | string decimal | opcional; se informado, maior ou igual a zero |
+| temperatura_agua | string decimal | opcional |
+| ph | string decimal | opcional; se informado, entre 0 e 14 |
+| oxigenio_dissolvido | string decimal | opcional; se informado, maior ou igual a zero |
+| condutividade | string decimal | opcional; se informado, maior ou igual a zero |
+| turbidez | string decimal | opcional; se informado, maior ou igual a zero |
 | fonte | string | obrigatório, identifica a origem do registro |
 
 ## 7. Regras de normalização
@@ -128,7 +131,7 @@ Antes do armazenamento, os dados devem passar por normalização, nesta ordem:
 - converter `operador_ativo` e `estacao_ativa` para booleano;
 - converter `data_hora` para um tipo de data/hora;
 - padronizar `cidade_estado` em letras maiúsculas;
-- tratar valores nulos e vazios como erro, pois todos os campos atuais são obrigatórios;
+- converter medições vazias em nulo; nos campos obrigatórios, valores nulos e vazios são erro de validação;
 - registrar registros inválidos para posterior correção.
 
 O horário recebido não contém fuso. A aplicação deve documentar e aplicar uma única convenção, preferencialmente `America/Sao_Paulo`, antes da persistência.
