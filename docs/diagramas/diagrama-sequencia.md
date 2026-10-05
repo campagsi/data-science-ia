@@ -66,10 +66,10 @@ A aplicação solicita dados ao cliente da fonte externa por meio do método `fe
 
 ### 3. `normalization_service.py`
 
-O serviço de normalização converte números e booleanos recebidos como strings, transforma `data_hora` em data/hora e limpa os campos textuais. Ele não substitui a validação: apenas prepara o registro para que ela seja executada de forma previsível.
+O serviço de normalização limpa os textos, converte números e `data_hora_ciclo` e separa cada registro em cabeçalho mais uma lista de itens, um por parâmetro (`*_tipo_codigo`). Em seguida, anonimiza o operador com `src/security.py` e não copia CPF, nome e e-mail originais. O que não pode ser convertido vai para o log de rejeitados sem interromper o lote. O formato de saída está na seção 3 de [analise-implementacao.md](../analise-implementacao.md). Ele não substitui a validação: apenas prepara o registro para que ela seja executada de forma previsível.
 
 ### 4. `validation_service.py` -> modelos
-A validação é feita pelo serviço `validation_service.py`, usando métodos como `validate_data()`. Ele valida as entidades do domínio, como `Estacao` e `Leitura`, acessando métodos específicos como `validar_estacao()` e `validar_leitura()`. Esse passo garante que os dados tenham estrutura e tipos consistentes.
+A validação é feita por `ValidationService.validate_data()`, antes de qualquer gravação, e não grava nem loga: devolve um resultado por registro com `valido`, `campos_nulos`, `itens_invalidos`, `motivos` e o registro só com as medições válidas (contrato na seção 4 de [analise-implementacao.md](../analise-implementacao.md)). Em seguida, `main.py` chama `registrar_resultados_validacao()` (`src/logger.py`), que grava o log de rejeitados, e envia à persistência só `ValidationService.registros_validos(resultados)`.
 
 ### 5. `leitura_repository.py` -> `database.py`
 Após a validação, os registros são enviados ao repositório `leitura_repository.py`, que executa `save_readings()`. Esse repositório abre uma transação em `DatabaseConnection` (`src/database/connection.py`) e grava, na mesma conexão, cidades, operadores, estações (`insert_estacao()`) e leituras (`insert_leituras()`). O commit ocorre somente ao final; qualquer falha desfaz o lote inteiro. O schema não é criado pelo pipeline: ele já deve existir, criado pelo `sql/ddl_banco_relacional.sql` e mantido por `sql/migrations/`.

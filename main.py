@@ -5,7 +5,7 @@ from src.cli.console_app import Console_APP
 from src.config import Settings, load_config
 from src.database.connection import DatabaseConnection
 from src.ingestion.data_client import DataClient
-from src.logger import configurar_logs, logger
+from src.logger import configurar_logs, logger, registrar_resultados_validacao
 from src.repository.leitura_repository import LeituraRepository
 from src.security import configurar_seguranca
 from src.services.analytics_service import AnaliticsService
@@ -19,7 +19,10 @@ def run_pipeline() -> dict[str, Any]:
     settings = load_config()
     raw_data = DataClient(settings).fetch_data()
     normalized_data = NormalizationService().normalize(raw_data)
-    validated_data = ValidationService().validate_data(normalized_data)
+    # Faixas de Parametros e siglas de Estados passam a vir do banco na fase 8.
+    resultados = ValidationService().validate_data(normalized_data)
+    registrar_resultados_validacao(resultados)
+    validated_data = ValidationService.registros_validos(resultados)
 
     # O schema é mantido por sql/ddl_banco_relacional.sql e sql/migrations/.
     database = DatabaseConnection(settings.azure_sql_connectionstring)

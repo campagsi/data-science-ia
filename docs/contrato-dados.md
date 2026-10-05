@@ -1,5 +1,7 @@
 # Contrato de dados
 
+> **Parte 2:** o payload da API mudou (uma medição vira cinco campos: valor, `_unidade_medida`, `_codigo`, `_tipo_codigo` e `data_hora_leitura_`; operador com CPF, nome completo e e-mail). O mapeamento atual do payload para o banco, o formato normalizado e as regras de nulos estão nas seções 3 e 4 de [analise-implementacao.md](analise-implementacao.md). Este documento descreve o contrato da Parte 1 e será reescrito na fase 11 do [TODO](todo-idempotencia.md).
+
 ## 1. Objetivo
 
 Este documento define o formato esperado dos dados que entram no sistema, a estrutura de saída do processamento e as regras de validação aplicadas ao fluxo de ingestão e persistência.

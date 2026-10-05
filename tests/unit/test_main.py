@@ -7,10 +7,14 @@ import pytest
 
 import main
 from src.config import Settings
+from src.services.validation_service import ValidationService
 
 
 class Falha(Exception):
     pass
+
+
+REGISTRO_VALIDO = {"registro_codigo": "R1", "itens": [{"campo": "ph", "valor": 7.0}]}
 
 
 @pytest.fixture
@@ -34,7 +38,16 @@ def pipeline_falso(monkeypatch):
     class ValidacaoFalsa:
         def validate_data(self, dados):
             chamadas.append("validação")
-            return ["validado"]
+            return [
+                {"registro_codigo": "R1", "valido": True, "campos_nulos": [],
+                 "itens_invalidos": [], "motivos": [], "registro": REGISTRO_VALIDO},
+                {"registro_codigo": "R2", "valido": False, "campos_nulos": ["estacao_codigo"],
+                 "itens_invalidos": [], "motivos": [{"etapa": "completude", "campo": "estacao_codigo",
+                                                     "motivo": "campo vital nulo", "valor": None}],
+                 "registro": {"registro_codigo": "R2", "itens": []}},
+            ]
+
+        registros_validos = staticmethod(ValidationService.registros_validos)
 
     class DatabaseFalso:
         def __init__(self, connection_string):
@@ -81,7 +94,7 @@ def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
         "coleta",
         "normalização",
         "validação",
-        ("persistência", ["validado"]),
+        ("persistência", [REGISTRO_VALIDO]),
         ("banco da análise", "Server=teste"),
         "análise",
     ]
@@ -118,7 +131,7 @@ def test_falha_interrompe_as_etapas_seguintes(pipeline_falso, monkeypatch):
     with pytest.raises(Falha):
         main.run_pipeline()
 
-    assert ("persistência", ["validado"]) not in pipeline_falso
+    assert ("persistência", [REGISTRO_VALIDO]) not in pipeline_falso
     assert "análise" not in pipeline_falso
 
 

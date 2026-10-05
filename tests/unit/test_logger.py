@@ -92,6 +92,51 @@ def test_contagem_de_rejeicoes_por_nivel_e_reiniciada(arquivos, tmp_path):
     assert log.contar_rejeicoes() == {}
 
 
+def _resultado(codigo, valido, motivos=(), itens_invalidos=(), itens_validos=1):
+    return {
+        "registro_codigo": codigo,
+        "valido": valido,
+        "campos_nulos": [],
+        "itens_invalidos": list(itens_invalidos),
+        "motivos": list(motivos),
+        "registro": {"itens": [{}] * itens_validos},
+    }
+
+
+def test_resultados_da_validacao_viram_linhas_e_contagens(arquivos):
+    resultados = [
+        _resultado(
+            "REG-1", True,
+            itens_invalidos=[
+                {"etapa": "completude", "campo": "ph", "motivo": "medição nula", "valor": None},
+                {"etapa": "acuracia", "campo": "umidade", "motivo": "fora da faixa 0 a 100", "valor": 145.0},
+            ],
+            itens_validos=9,
+        ),
+        _resultado(
+            "REG-2", False,
+            motivos=[{"etapa": "completude", "campo": "estacao_codigo,operador_codigo",
+                      "motivo": "campo vital nulo", "valor": None}],
+            itens_invalidos=[{"etapa": "completude", "campo": "ph", "motivo": "medição nula", "valor": None}],
+        ),
+    ]
+
+    contagens = log.registrar_resultados_validacao(resultados)
+
+    assert contagens == {
+        "registros_validos": 1, "registros_invalidos": 1, "itens_validos": 9, "itens_invalidos": 2,
+    }
+    linhas = _ler(arquivos["rejeitados"])
+    assert len(linhas) == 3  # as medições do registro inválido não são listadas
+    assert 'nivel=item registro=REG-1 campo=ph motivo="medição nula"' in linhas[0]
+    assert 'etapa=acuracia nivel=item registro=REG-1 campo=umidade valor=145.0' in linhas[1]
+    assert (
+        'etapa=completude nivel=leitura registro=REG-2 campo=estacao_codigo,operador_codigo '
+        'motivo="campo vital nulo"'
+    ) in linhas[2]
+    assert log.contar_rejeicoes() == {"item": 2, "leitura": 1}
+
+
 def test_resumo_em_info(arquivos):
     log.registrar_resumo(recebidos=10, importados=8, rejeitados=2)
 

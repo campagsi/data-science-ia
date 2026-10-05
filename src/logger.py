@@ -102,6 +102,42 @@ def registrar_rejeicao(
     __rejeicoes[nivel] += 1
 
 
+def registrar_resultados_validacao(resultados: list[dict]) -> dict[str, int]:
+    """
+    Grava no log de rejeitados o que a validação recusou e devolve as contagens.
+
+    - Registro inválido: uma linha por motivo (os campos nulos vêm juntos numa
+      linha só, ex.: campo=estacao_codigo,operador_codigo). As medições dele não
+      são listadas, porque o registro inteiro não é gravado.
+    - Registro válido: uma linha por medição descartada (nula ou fora da faixa).
+    """
+    contagens = Counter()
+    for resultado in resultados:
+        registro = resultado["registro_codigo"]
+        if not resultado["valido"]:
+            contagens["registros_invalidos"] += 1
+            for motivo in resultado["motivos"]:
+                registrar_rejeicao(
+                    motivo["etapa"], "leitura", motivo["campo"], motivo["motivo"],
+                    registro=registro, valor=motivo["valor"],
+                )
+            continue
+
+        contagens["registros_validos"] += 1
+        contagens["itens_validos"] += len(resultado["registro"]["itens"])
+        contagens["itens_invalidos"] += len(resultado["itens_invalidos"])
+        for item in resultado["itens_invalidos"]:
+            registrar_rejeicao(
+                item["etapa"], "item", item["campo"], item["motivo"],
+                registro=registro, valor=item["valor"],
+            )
+
+    return {
+        chave: contagens[chave]
+        for chave in ("registros_validos", "registros_invalidos", "itens_validos", "itens_invalidos")
+    }
+
+
 def contar_rejeicoes() -> dict[str, int]:
     """Quantidade de rejeições registradas por nível desde a última configuração."""
     return dict(__rejeicoes)

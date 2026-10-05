@@ -68,6 +68,39 @@ Payload atual da API (`src/api/data_set.json`): **9.888 registros**, um registro
 | `<param>_unidade_medida` | `Parametros.unidade_medida` | Exceções no payload: `oxigenio_dissolvido_medida` e `velocidade_unidade_medida`. |
 | `<param>_codigo` (ex.: `PH-RJ001-00001`), `data_hora_leitura_<param>` | — | Sem coluna no DDL (D5). |
 
+### Formato do registro normalizado (fase 4)
+
+Saída de `NormalizationService.normalize()`: um dicionário por registro, ordenado por `data_hora_ciclo`. Os nomes de campo são os do payload, para o log de rejeitados citar exatamente o campo de origem.
+
+```python
+{
+    "registro_codigo": "REG-RJ-001-00001",
+    "data_hora_ciclo": datetime(2026, 4, 1, 0, 0),
+    "cidade_estado": "RJ",
+    "municipio": "Rio de Janeiro",            # cai para cidade_nome se vier nulo
+    "estacao_codigo": "EST-RJ-001",
+    "estacao_nome": "Estação Integrada Guanabara Norte",
+    "estacao_latitude": -22.8768,
+    "estacao_longitude": -43.1929,
+    "operador_codigo": "OP-RJ-001",
+    "cpf_hash": "<64 hex>",                   # originais não são copiados
+    "nome_hash": "<64 hex>",
+    "email_criptografado": "<token Fernet>",
+    "itens": [
+        {"campo": "ph", "codigo_parametro": "TIP-PH", "unidade_medida": "pH",
+         "valor": 7.53, "data_hora_leitura": datetime(2026, 4, 1, 0, 2, 10)},
+        ...                                   # valor None = medição nula (fase 5)
+    ],
+}
+```
+
+Na normalização, um texto vazio vira `None`. O que não pode ser convertido não derruba o lote:
+
+- medição não numérica ou sem `*_tipo_codigo`: rejeita só o item;
+- `data_hora_ciclo` ou coordenada inválida: rejeita só a leitura.
+
+Campo vital nulo não é rejeitado aqui; isso fica para a completude (fase 5).
+
 ### Parâmetros presentes hoje no payload (11)
 
 `temperatura_agua` (TIP-TAG, °C), `ph` (TIP-PH, pH), `temperatura` (TIP-TMP, °C), `umidade` (TIP-UMI, %), `pressao` (TIP-PRE, hPa), `precipitacao` (TIP-CHU, mm), `velocidade_vento` (TIP-VEN, km/h), `radiacao_solar` (TIP-RAD, W/m²), `oxigenio_dissolvido` (TIP-OXI, mg/L), `condutividade` (TIP-CON, µS/cm), `turbidez` (TIP-TUR, NTU).
@@ -97,8 +130,45 @@ Sem unidade, não há como cadastrar (`unidade_medida NOT NULL`): o parâmetro �
 | Completude: leitura sem nenhuma medição | 0 | Rejeitar o cabeçalho (evita `Leituras` órfã de itens) |
 | Completude: `data_hora_ciclo` nula | 0 | Rejeitar |
 | Unicidade | `registro_codigo` único em 9.888; nenhum par (estação, ciclo) repetido | Unicidade garantida no banco pela chave natural (D1) |
-| Acurácia | pH fora de 0–14: 73; umidade fora de 0–100: 69; negativos em precipitação (37), radiação (39), OD (40), condutividade (40) e turbidez (28) | Rejeitar **o item**, comparando com `Parametros.valor_minimo/maximo` |
+| Acurácia | Com as faixas do DML, 603 medições fora da faixa nos registros válidos (pH 72, umidade 69, radiação 81, pressão 75, vento 73, OD 68, temperatura da água 60, condutividade 40, precipitação 37, turbidez 28) | Rejeitar **o item**, comparando com `Parametros.valor_minimo/maximo` |
 | Tempestividade | Ciclos de 01/04/2026 a 23/10/2026; nenhuma `data_hora_leitura_*` anterior ao ciclo | Ordenar por `data_hora_ciclo` antes de gravar |
+
+### Resultado da validação por registro (requisito do time, 05/10/2026)
+
+A verificação dos campos acontece **antes de gravar** em qualquer destino. Ela **não grava nem loga**: devolve um resultado por registro, e as etapas seguintes decidem o que fazer com ele.
+
+`validate_data(normalizados)` devolve uma lista (array) com **um resultado por registro recebido**, na mesma ordem:
+
+```python
+{
+    "registro_codigo": "REG-RJ-001-00042",
+    "valido": False,                        # o registro pode ou não ser ingerido
+    "campos_nulos": ["operador_codigo", "cpf_hash"],   # campos que faltaram ou vieram nulos
+    "itens_invalidos": [                    # medições descartadas de um registro que segue válido
+        {"campo": "ph", "motivo": "fora da faixa 0–14", "valor": 17.0},
+        {"campo": "umidade", "motivo": "medição nula", "valor": None},
+    ],
+    "motivos": ["campo vital nulo"],        # por que valido=False (vazio se válido)
+    "registro": {...},                      # registro normalizado só com os itens válidos
+}
+```
+
+Regras:
+
+- `valido=True` exige todos os campos vitais presentes e ao menos um item válido; os itens inválidos não invalidam o registro, só saem de `registro["itens"]`.
+- `campos_nulos` lista **todos** os campos ausentes ou nulos de uma vez, não só o primeiro.
+- Dados pessoais aparecem só pelo **nome** do campo; o `valor` de campo pessoal nunca é preenchido.
+
+Quem usa o resultado:
+
+| Consumidor | Uso |
+|---|---|
+| Log (`src/logger.py`) | Uma única função percorre os resultados e grava no `rejeitados_*.log`: uma linha por registro inválido (com todos os `campos_nulos`) e uma por item inválido. Assim o formato do log fica igual para todas as regras. |
+| Data Lake | Silver (fase futura) recebe só `valido=True`. A Bronze guarda o bruto do lote, como o enunciado pede (item 3.1), e pode gravar junto o resultado (`valido`, `campos_nulos`) como metadado de controle. |
+| Entidades (banco) | A persistência (fase 8) recebe só `registro` dos resultados com `valido=True`. |
+| Resumo | Recebidos = válidos + inválidos; itens gravados e itens rejeitados saem dos mesmos resultados. |
+
+As rejeições que acontecem **antes** da validação, na normalização (valor que não pode ser convertido, fase 4), já são registradas no log pela própria normalização. Esses registros não chegam à validação, e o resumo da execução soma as duas origens.
 
 Ponto de atenção: pelo enunciado (3.4), **outlier estatístico não é descartado**, só sinalizado. Só o valor fisicamente impossível (fora de `valor_minimo/maximo`) é rejeitado na ingestão.
 
@@ -175,8 +245,8 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 | `sql/migrations/` (novo) | Uma migration idempotente `VNNN__descricao.sql` por mudança de estrutura; o DDL é atualizado na mesma entrega. |
 | [src/ingestion/data_client.py](../src/ingestion/data_client.py) | Adicionar tratamento de queda de conexão, resposta vazia e rate limit, com logs (padrão de `extrair_dados_api`). |
 | [src/ingestion/importar_dados.py](../src/ingestion/importar_dados.py) | Reescrita para a nova ordem: Estados (busca) → Municípios → Operadores → Estações → Parâmetros → Leituras/Itens (por partição). Os caches `__cidades`, `__operadores` e `__estacoes` passam a ser municípios, operadores, estações e parâmetros. |
-| [src/services/normalization_service.py](../src/services/normalization_service.py) | `_TEXT_FIELDS` e `_FLOAT_FIELDS` usam nomes antigos (`operador_nome`, `data_hora`, `fonte`). Passa a normalizar o payload novo e a "explodir" cada registro em cabeçalho + itens. |
-| [src/services/validation_service.py](../src/services/validation_service.py) | Hoje **aborta o lote inteiro** no primeiro erro (`raise ValueError("Lote inválido...")`). Precisa rejeitar **por registro e por item**, devolvendo aprovados e rejeitados (D4). As faixas saem do código e passam a vir de `Parametros`. |
+| [src/services/normalization_service.py](../src/services/normalization_service.py) | **Reescrito na fase 4:** payload novo, cabeçalho + itens, descoberta de parâmetros, anonimização e minimização, rejeição por item ou leitura sem derrubar o lote. |
+| [src/services/validation_service.py](../src/services/validation_service.py) | **Reescrito nas fases 5 e 6:** um resultado por registro (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`, `registro`; contrato na seção 4), sem abortar o lote. Faixas e siglas recebidas no construtor; a leitura delas no banco entra na fase 8. |
 | [src/models/](../src/models/) | `CidadeModel` → `MunicipioModel`; `EstadoModel` já existe; novos `ParametroModel` e `LeituraItemModel`; `LeituraModel` vira cabeçalho (`operador_id`, `estacao_id`, `data_hora`, `fonte`); `OperadorModel` e `EstacaoModel` seguem as colunas do DDL. |
 | [src/repository/](../src/repository/) | `CidadeRepository` → `MunicipioRepository`; `EstadoRepository` já existe; novos `ParametroRepository` e itens de leitura; todos os `create_many` passam a ser idempotentes (`MERGE`/partição). Há métodos com SQL montado por f-string (`create` em `leitura_repository.py` e `operador_repository.py`) que precisam sair. |
 | [src/services/analytics_service.py](../src/services/analytics_service.py), [src/cli/](../src/cli/), [src/services/report_service.py](../src/services/report_service.py) | Consultam `Cidades` e as colunas largas de `Leituras` e **vão quebrar**. Precisam ler `Leitura_Itens` + `Parametros` e pivotar no pandas. Fica fora do TODO de idempotência e entra na fase de analytics. |
@@ -189,7 +259,7 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 ## 8. Impacto nos testes
 
 - `tests/integration/conftest.py` já monta o banco de teste com o DDL + migrations. `test_persistencia.py` e `test_pipeline_e2e.py` ainda usam o modelo antigo e estão pulados (`pytest.mark.skip`) até serem reescritos nas fases 8 e 10.
-- `test_validation_service.py` e `test_normalization_service.py` usam payloads antigos.
+- `test_normalization_service.py` (fase 4), `test_validation_service.py` (fases 5 e 6) e `tests/test_quality_stat.py` já usam o payload novo. A fixture `registro_legado` (formato antigo) sobra só para `integration/test_persistencia.py`, que está pulado.
 - `test_analytics_service.py` e `test_report_service.py` dependem das colunas largas.
 - Novo `tests/test_quality_stat.py`: completude, acurácia, descoberta de parâmetros, idempotência (rodar duas vezes e conferir contagens) e conteúdo do log de rejeitados.
 - Novos testes de `src/security.py` (hash determinístico com 64 caracteres, `None` para vazio, ida e volta da criptografia do e-mail) e de `src/logger.py` (formato da linha e ausência de dado pessoal no arquivo de rejeitados).
@@ -289,15 +359,61 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 
 ### Fase 4 — Normalização e anonimização do payload novo
 
-- **Status:** pendente.
+- **Status:** concluída em 05/10/2026.
+- **Alterações:**
+  - `src/services/normalization_service.py` reescrito: formato de saída na seção 3; `descobrir_parametros()` para a fase 7; usa `src/security.py` e `src/logger.py`. O antigo `__normalize_bool` saiu: `estacao_ativa` e `operador_ativo` são descartados (D5).
+  - `tests/conftest.py`:
+    - `registro_bruto` passa a ser o 1º registro real do `data_set.json`;
+    - novas fixtures `dataset`, `seguranca` e `logs_temporarios`;
+    - `registro_legado` (formato antigo, literal) atende os testes do `ValidationService` até as fases 5 e 6.
+  - `tests/unit/test_normalization_service.py` reescrito (21 testes, incluindo o aceite com o dataset completo); `test_validation_service.py` e `integration/test_persistencia.py` passam a usar `registro_legado`.
+  - `tests/unit/test_sql_scripts.py`: a conferência dos parâmetros percorre todos os registros do dataset, não só o primeiro.
+- **Decisões:**
+  - Os nomes do cabeçalho seguem os do payload (`estacao_codigo`, `cidade_estado`...), para o log de rejeitados apontar o campo de origem.
+  - A medição nula continua como item com `valor=None`; quem a rejeita é a completude (fase 5), e não a normalização.
+  - `data_hora_leitura_<param>` é guardada no item, mas não é persistida (D5).
+  - Parâmetro novo sem unidade fica com `unidade_medida=None`; a decisão de cadastrar ou não é da fase 7.
+- **Validações:**
+  - `pytest`: **115 passaram e 7 foram pulados**.
+  - O dataset completo foi normalizado com zero rejeições, 11 parâmetros e datas em ordem.
+  - Os campos descartados aparecem no log em INFO, só pelo nome.
+- **Pendência conhecida:** entre as fases 4 e 6, a `run_pipeline()` não funciona de ponta a ponta, porque a validação ainda espera o formato antigo. O `main.py` não a chama neste período.
 
 ### Fase 5 — Campos nulos (completude)
 
-- **Status:** pendente.
+- **Status:** concluída em 05/10/2026, junto com a fase 6 (mesma função). O destino no Data Lake fica para a fase 8.
+- **Alterações:**
+  - `src/services/validation_service.py` reescrito com o contrato da seção 4:
+    - `CAMPOS_VITAIS` com os 12 campos do cabeçalho;
+    - todos os nulos reunidos em `campos_nulos` e num só motivo `completude`;
+    - medição nula vai para `itens_invalidos`;
+    - leitura sem medições válidas é inválida;
+    - `registros_validos()` para a persistência.
+  - `src/logger.py`: `registrar_resultados_validacao(resultados)` grava as linhas de rejeitados a partir dos resultados e devolve as contagens. As medições de um registro inválido não são listadas, porque ele não é gravado.
+  - `main.py`: `run_pipeline()` valida, registra o log pelos resultados e envia só `registros_validos()` à persistência.
+  - `validar_estacao()` e `validar_leitura()` removidos (usavam os modelos antigos).
+- **Decisões:**
+  - A validação não consulta o banco: faixas e siglas chegam pelo construtor, o que deixa a regra testável sem banco.
+  - Os erros de conversão da normalização (fase 4) continuam sendo logados pela própria normalização (recomendação aceita pelo time).
+- **Validações:** ver fase 6.
 
 ### Fase 6 — Acurácia e validação por registro
 
-- **Status:** pendente.
+- **Status:** concluída em 05/10/2026. A leitura das faixas e das siglas no banco fica para a fase 8.
+- **Alterações:**
+  - Regras de acurácia: faixa por `codigo_parametro`, com `None` = sem limite e limites inclusivos; latitude e longitude invalidam a leitura.
+  - Regras de referência e validade: estado não cadastrado e sigla fora do formato.
+  - Regras de unicidade: `registro_codigo` repetido (fica o primeiro); `estacao_codigo` ou `operador_codigo` com dados cadastrais diferentes. O e-mail criptografado fica fora da comparação, porque o token muda a cada execução.
+  - `tests/unit/test_validation_service.py` reescrito (27 casos) e `tests/unit/test_logger.py` com o teste de `registrar_resultados_validacao`.
+  - `tests/test_quality_stat.py` com o aceite das fases 5 e 6 usando o dataset completo e as faixas do `dml_populacao.sql`.
+  - `tests/unit/test_main.py` com o resultado da validação no formato novo.
+- **Validações:**
+  - **Conferência independente:** um cálculo feito direto sobre o JSON bruto, sem usar o `ValidationService`, deu os mesmos números:
+    - **82** registros inválidos (50 sem estação nem operador; 32 só sem operador) e **9.806** válidos;
+    - **2.681** medições nulas e **603** fora da faixa nos registros válidos.
+  - Log de rejeitados com 3.366 linhas e sem CPF nem e-mail.
+  - `pytest`: **136 passaram e 7 foram pulados**.
+- **Correção de um número da análise:** o pH fora de 0–14 nos registros **válidos** é 72, e não 73. A 73ª ocorrência está num registro já rejeitado por completude.
 
 ### Fase 7 — Cadastro automático de parâmetros
 

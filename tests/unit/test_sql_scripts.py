@@ -42,18 +42,25 @@ def test_dml_cobre_os_estados_do_dataset(dataset):
 
 
 def test_dml_cadastra_todos_os_parametros_do_dataset_com_a_mesma_unidade(dataset):
-    registro = dataset[0]
-    parametros_payload = {
-        campo.removesuffix("_tipo_codigo"): valor
+    """
+    Percorre todos os registros: um parâmetro novo no data_set.json faz este
+    teste falhar, lembrando de incluí-lo no DML com nome legível e faixa.
+    Na ingestão, um parâmetro fora do DML não bloqueia a carga: é cadastrado
+    automaticamente (fase 7 do TODO).
+    """
+    encontrados = {
+        (campo.removesuffix("_tipo_codigo"), valor)
+        for registro in dataset
         for campo, valor in registro.items()
-        if campo.endswith("_tipo_codigo")
+        if campo.endswith("_tipo_codigo") and valor is not None
     }
 
-    assert len(parametros_payload) == 11
-    for nome_campo, codigo in parametros_payload.items():
+    assert len(encontrados) == 11
+    for nome_campo, codigo in encontrados:
         assert codigo in PARAMETROS, f"{codigo} ({nome_campo}) não está no dml_populacao.sql"
         campo_unidade = UNIDADE_ALTERNATIVA.get(nome_campo, f"{nome_campo}_unidade_medida")
-        assert PARAMETROS[codigo]["unidade"] == registro[campo_unidade], codigo
+        unidades = {r.get(campo_unidade) for r in dataset if r.get(campo_unidade)}
+        assert unidades == {PARAMETROS[codigo]["unidade"]}, codigo
 
 
 def test_dml_tem_nomes_de_parametro_unicos_e_faixas_coerentes():

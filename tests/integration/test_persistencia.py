@@ -25,8 +25,8 @@ def test_save_readings_persiste_entidades_relacionadas(database, contagens, regi
     assert orfas == 0
 
 
-def test_falha_em_leituras_desfaz_o_lote_inteiro(database, contagens, registro_normalizado):
-    invalido = dict(registro_normalizado, fonte=None)
+def test_falha_em_leituras_desfaz_o_lote_inteiro(database, contagens, registro_legado):
+    invalido = dict(registro_legado, fonte=None)
 
     with pytest.raises((RuntimeError, ValueError)):
         LeituraRepository(database).save_readings([invalido])

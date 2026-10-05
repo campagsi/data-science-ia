@@ -159,18 +159,25 @@ Desenho em [seguranca-lgpd.md](seguranca-lgpd.md) e na seção 6 da análise.
 
 ## Fase 4 — Normalização e anonimização do payload novo
 
-- [ ] Atualizar `_TEXT_FIELDS` e `_FLOAT_FIELDS` para os nomes novos (`operador_nome_completo`, `operador_cpf`, `operador_email`, `municipio`, `registro_codigo`, `data_hora_ciclo` etc.)
-- [ ] Converter `data_hora_ciclo` (e `data_hora_leitura_*`) para `datetime`
-- [ ] Separar cada registro em **cabeçalho** (estado, município, estação, operador, registro, data/hora) + **lista de itens** (`codigo_parametro`, `nome_campo`, `unidade`, `valor`)
-- [ ] Descobrir os parâmetros pelos campos `*_tipo_codigo`, sem lista fixa no código
-- [ ] Resolver os nomes de unidade fora do padrão (`oxigenio_dissolvido_medida`, `velocidade_unidade_medida`)
-- [ ] Texto vazio (`""`, `"   "`) → `None`
-- [ ] Valor não numérico numa medição → item rejeitado e logado, **sem derrubar o lote** (hoje `normalize` lança `ValueError` e para tudo)
-- [ ] Ordenar os registros por `data_hora_ciclo`
-- [ ] Logo após a normalização, aplicar `src/security.py`: gerar `cpf_hash`, `nome_hash` e `email_criptografado`
-- [ ] **Minimização** (passo 4 do `transform.py`): remover `operador_cpf`, `operador_nome_completo` e `operador_email` do registro antes de seguir para validação, log e persistência
+- [x] Campos do payload novo (`registro_codigo`, `data_hora_ciclo`, `municipio`, `operador_cpf`, `operador_nome_completo`, `operador_email` etc.); formato de saída na seção 3 da análise
+- [x] Converter `data_hora_ciclo` (e `data_hora_leitura_*`) para `datetime`
+- [x] Separar cada registro em **cabeçalho** + **lista de itens** (`campo`, `codigo_parametro`, `unidade_medida`, `valor`, `data_hora_leitura`)
+- [x] Descobrir os parâmetros pelos campos `*_tipo_codigo`, sem lista fixa no código (`NormalizationService.descobrir_parametros`)
+- [x] Resolver os nomes de unidade fora do padrão (`oxigenio_dissolvido_medida`, `velocidade_unidade_medida`)
+- [x] Texto vazio (`""`, `"   "`) → `None`; `municipio` nulo usa `cidade_nome`
+- [x] Valor não numérico numa medição → item rejeitado e logado, **sem derrubar o lote**; data/hora ou coordenada inválida → só aquela leitura rejeitada
+- [x] Ordenar os registros por `data_hora_ciclo` (sem data ao final)
+- [x] Logo após a limpeza, aplicar `src/security.py`: gerar `cpf_hash`, `nome_hash` e `email_criptografado`
+- [x] **Minimização** (passo 4 do `transform.py`): os campos pessoais originais não são copiados para o registro normalizado
+- [x] Campos sem coluna no banco (D5) listados uma vez por lote em INFO, sem valores
 
-**Aceite:** os 9.888 registros normalizados sem exceção; 11 parâmetros descobertos; nenhum registro normalizado contém os três campos pessoais originais.
+**Aceite:**
+
+- [x] Os 9.888 registros normalizados sem exceção e sem nenhuma rejeição (testado)
+- [x] 11 parâmetros descobertos (testado)
+- [x] Nenhum registro normalizado contém os três campos pessoais originais (testado)
+
+> Entre as fases 4 e 6, a `run_pipeline()` não funciona de ponta a ponta: o `ValidationService` ainda espera o formato antigo. Ela não é chamada pelo `main.py` neste período.
 
 ---
 
@@ -188,24 +195,44 @@ Regras por nível:
 | Leitura | todos os itens nulos ou rejeitados | Rejeitar a leitura (sem cabeçalho órfão) | WARNING `motivo="leitura sem medições válidas"` |
 | Parâmetro | unidade de medida ausente | Não cadastrar o parâmetro; itens dele rejeitados | ERROR `etapa=parametro` |
 
-- [ ] Implementar as regras acima
-- [ ] Logar **todos** os campos nulos de um registro numa única linha (ex.: `campo=estacao_codigo,operador_codigo`)
+**Resultado da verificação (requisito do time):** contrato completo na seção 4 de [analise-implementacao.md](analise-implementacao.md).
 
-**Aceite com o dataset atual:** 82 leituras rejeitadas por estação ou operador nulo (50 + 32), e cada medição nula do restante aparece no log de rejeitados com `nivel=item`.
+- [x] A verificação dos campos roda **antes de gravar** em qualquer tabela ou no Data Lake e **não grava nem loga**: só devolve o resultado
+- [x] `validate_data()` devolve uma lista (array) com **um resultado por registro**, contendo:
+  - `valido` (bool): se o registro pode ou não ser ingerido
+  - `campos_nulos` (lista): **todos** os campos que faltaram ou vieram nulos
+  - `itens_invalidos` (lista): medições descartadas (`campo`, `motivo`, `valor`), sem invalidar o registro
+  - `motivos` (lista): por que `valido=False`
+  - `registro`: o registro normalizado só com os itens válidos
+- [x] Uma função de `src/logger.py` (`registrar_resultados_validacao`) grava o log de rejeitados **a partir dos resultados**: uma linha por registro inválido (com todos os `campos_nulos`, ex.: `campo=estacao_codigo,operador_codigo`) e uma por item inválido
+- [x] `ValidationService.registros_validos(resultados)` entrega só os registros com `valido=True`, usado pela `run_pipeline()` antes da persistência
+- [ ] Destino no Data Lake pelos resultados (Silver só com `valido=True`; Bronze com o bruto e o resultado como metadado) → junto com a Bronze, na fase 8
+- [x] Implementar as regras da tabela acima preenchendo esse resultado (a regra de parâmetro sem unidade fica na fase 7)
+
+**Aceite com o dataset atual** (testado em `tests/test_quality_stat.py`):
+
+- [x] 82 leituras rejeitadas por estação ou operador nulo (50 + 32)
+- [x] As 2.681 medições nulas dos registros válidos aparecem no log de rejeitados com `nivel=item`
 
 ---
 
 ## Fase 6 — Acurácia e validação por registro
 
-- [ ] `validate_data` passa a devolver `(aprovados, rejeitados)` em vez de abortar o lote
-- [ ] Faixas lidas de `Parametros.valor_minimo/valor_maximo` (`NULL` = sem limite), sem dicionário fixo no código
-- [ ] Valor fora da faixa → rejeitar **só o item** e logar `etapa=acuracia` com o valor e a faixa
-- [ ] Latitude e longitude fora da faixa → rejeitar a leitura (o CHECK do banco também barra)
-- [ ] `cidade_estado` inexistente em `Estados` → rejeitar a leitura
-- [ ] Mesmo `operador_codigo` ou `estacao_codigo` com dados diferentes no lote → rejeitar e logar (a regra de `__validate_batch_uniqueness` continua, mas por registro)
-- [ ] Mesmo `registro_codigo` repetido no lote (retransmissão) → manter o primeiro e logar `etapa=unicidade`
+- [x] `validate_data` deixa de abortar o lote: as regras de acurácia e unicidade preenchem o mesmo resultado por registro da fase 5 (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`)
+- [x] Faixas recebidas no construtor (`ValidationService(faixas=..., siglas_estados=...)`), sem dicionário fixo no código (`NULL` = sem limite; parâmetro sem faixa = sem conferência)
+- [ ] Ler as faixas de `Parametros` e as siglas de `Estados` no banco e passá-las ao `ValidationService` → fase 8 (hoje a `run_pipeline()` valida sem faixas)
+- [x] Valor fora da faixa → rejeitar **só o item** (`etapa=acuracia`, com o valor e a faixa)
+- [x] Latitude e longitude fora da faixa → rejeitar a leitura (o CHECK do banco também barra)
+- [x] `cidade_estado` inexistente em `Estados` → rejeitar a leitura (`etapa=referencia`); sigla fora do formato → `etapa=validade`
+- [x] Mesmo `operador_codigo` ou `estacao_codigo` com dados cadastrais diferentes no lote → rejeitar a leitura (`etapa=unicidade`)
+- [x] Mesmo `registro_codigo` repetido no lote (retransmissão) → manter o primeiro (`etapa=unicidade`)
 
-**Aceite com o dataset atual:** os itens de pH fora de 0–14 (73), de umidade fora de 0–100 (69) e os negativos aparecem no log, e as leituras deles continuam gravadas com os demais itens.
+**Aceite com o dataset atual** (testado em `tests/test_quality_stat.py`, com as faixas do DML):
+
+- [x] 603 medições fora da faixa descartadas só como item, entre elas pH fora de 0–14 (72; a 73ª está num registro já rejeitado por completude) e umidade fora de 0–100 (69)
+- [x] As leituras dessas medições continuam válidas com os demais itens
+- [x] Nenhum item gravável fica fora da faixa
+- [x] Log de rejeitados com 3.366 linhas (82 leituras + 2.681 nulas + 603 fora da faixa), sem CPF nem e-mail
 
 ---
 
@@ -296,8 +323,10 @@ GROUP BY P.codigo_parametro ORDER BY 1;
 
 ## Fase 10 — Testes
 
-- [ ] [tests/test_quality_stat.py](../tests/test_quality_stat.py): completude (leitura e item), acurácia, unicidade, descoberta de parâmetro novo, unidade ausente e formato da linha do log de rejeitados
-- [ ] Testes unitários: normalização do payload novo e `validate_data` devolvendo aprovados e rejeitados
+- [x] [tests/test_quality_stat.py](../tests/test_quality_stat.py): completude, acurácia e log de rejeitados com o dataset completo (aceite das fases 5 e 6)
+- [ ] `tests/test_quality_stat.py`: estatística e outliers (fase de analytics)
+- [x] Testes unitários: normalização do payload novo (fase 4)
+- [x] Testes unitários: `validate_data` devolvendo um resultado por registro (`valido`, `campos_nulos` com todos os nulos, `itens_invalidos`, `motivos`, `registro` só com itens válidos) e o log gerado a partir desses resultados
 - [ ] `src/security.py`: hash determinístico com 64 caracteres, `None` para vazio, ida e volta de `criptografar_email` / `descriptografar_email`
 - [ ] `src/logger.py`: formato da linha de rejeitado e ausência de CPF, nome e e-mail nos arquivos de `logs/`
 - [ ] Integração: reescrever `test_persistencia.py` e `test_pipeline_e2e.py` para o modelo 3FN (hoje pulados com `pytest.mark.skip`), rodar o pipeline duas vezes e comparar as contagens. O banco de teste já é montado com DDL + migrations

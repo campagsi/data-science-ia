@@ -1,4 +1,4 @@
-﻿# Manual de execução
+# Manual de execução
 
 ## Requisitos
 
@@ -195,7 +195,7 @@ python -m pytest tests
 python -m pytest tests/unit/test_security.py tests/unit/test_logger.py
 ```
 
-Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (resultado esperado: `103 passed, 7 skipped`). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
+Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (resultado esperado: `136 passed, 7 skipped`). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
 
 ## Estrutura executada
 
