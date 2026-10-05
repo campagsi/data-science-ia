@@ -34,9 +34,6 @@ sequenceDiagram
     Leitura-->>Validator: leitura validada
     Validator-->>Main: registros_ok
 
-    Main->>DB: criar_tabelas()
-    Note over DB: Cria as tabelas que ainda não existem.
-
     Main->>Repository: save_readings(registros_ok)
     Repository->>DB: connect()
     Note over Repository,DB: DatabaseConnection.transaction() mantém uma única conexão para todo o lote.
@@ -62,7 +59,7 @@ sequenceDiagram
 ## Explicação das etapas com classes e métodos
 
 ### 1. `main.py` -> `config.py`
-O fluxo começa em `main.py`, executando o método `run_pipeline()`. Esse método chama `config.py` para carregar as configurações do ambiente por meio do método `load_config()`. A responsabilidade dessa etapa é preparar a aplicação corretamente antes do processamento.
+Antes de qualquer etapa, `main.py` executa `iniciar_aplicacao()`: `configurar_logs()` (`src/logger.py`), `load_config()` e `configurar_seguranca()` (`src/security.py`). Uma falha nesse ponto é registrada com nível `CRITICAL` e encerra a aplicação com código `1`. O pipeline segue em `run_pipeline()`. Esse método chama `config.py` para carregar as configurações do ambiente por meio do método `load_config()`. A responsabilidade dessa etapa é preparar a aplicação corretamente antes do processamento.
 
 ### 2. `main.py` -> `data_client.py`
 A aplicação solicita dados ao cliente da fonte externa por meio do método `fetch_data()`. Esse módulo é responsável por buscar os registros exclusivamente na API configurada em `MOCK_API` e entregar os dados brutos.
@@ -75,7 +72,7 @@ O serviço de normalização converte números e booleanos recebidos como string
 A validação é feita pelo serviço `validation_service.py`, usando métodos como `validate_data()`. Ele valida as entidades do domínio, como `Estacao` e `Leitura`, acessando métodos específicos como `validar_estacao()` e `validar_leitura()`. Esse passo garante que os dados tenham estrutura e tipos consistentes.
 
 ### 5. `leitura_repository.py` -> `database.py`
-Após a validação, `main.py` chama `criar_tabelas()` para criar as tabelas que ainda não existem. Em seguida, os registros são enviados ao repositório `leitura_repository.py`, que executa `save_readings()`. Esse repositório abre uma transação em `DatabaseConnection` (`src/database/connection.py`) e grava, na mesma conexão, cidades, operadores, estações (`insert_estacao()`) e leituras (`insert_leituras()`). O commit ocorre somente ao final; qualquer falha desfaz o lote inteiro.
+Após a validação, os registros são enviados ao repositório `leitura_repository.py`, que executa `save_readings()`. Esse repositório abre uma transação em `DatabaseConnection` (`src/database/connection.py`) e grava, na mesma conexão, cidades, operadores, estações (`insert_estacao()`) e leituras (`insert_leituras()`). O commit ocorre somente ao final; qualquer falha desfaz o lote inteiro. O schema não é criado pelo pipeline: ele já deve existir, criado pelo `sql/ddl_banco_relacional.sql` e mantido por `sql/migrations/`.
 
 ### 6. `analytics_service.py`
 Depois de salvar os dados, a análise é executada pelo serviço `analytics_service.py`, por meio do método `calculate_metrics()`. Esse serviço consulta o repositório por meio de `get_readings_by_station()` e aplica operações matemáticas como `media()`, `mediana()`, `desvio_padrao()` e `detectar_outliers()`.
@@ -85,7 +82,7 @@ No código, `AnaliticsService.calculate_metrics()` recebe o escopo (`cidade_id` 
 ### 7. `report_service.py`
 Por fim, a geração de relatório fica sob responsabilidade do serviço `report_service.py`, cujo método `generate_report()` recebe os indicadores calculados e devolve uma saída final para o usuário.
 
-No código, `generate_report()` devolve o relatório estruturado (escopo, período, estatísticas e outliers de cada grupo), que é o retorno de `run_pipeline()`. Para exibição no console, `ReportService.format_report()` converte esse relatório em texto, impresso por `main.py`.
+No código, `generate_report()` devolve o relatório estruturado (escopo, período, estatísticas e outliers de cada grupo), que é o retorno de `run_pipeline()`. Para exibição no console, `ReportService.format_report()` converte esse relatório em texto, que `main.py` registra no log de execução (`logs/pipeline_*.log`).
 
 ## Observação
 

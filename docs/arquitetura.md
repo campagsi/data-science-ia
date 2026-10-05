@@ -118,7 +118,7 @@ Responsável por armazenar e consultar os dados no banco.
 ### Componentes esperados
 
 - `connection.py`
-- `schema.py` ou `criar_tabelas.py`
+- scripts SQL em `sql/` (`ddl_banco_relacional.sql` e `migrations/`): o schema não é criado pelo Python
 - `repositories` para cada entidade
 
 ### Repositórios sugeridos

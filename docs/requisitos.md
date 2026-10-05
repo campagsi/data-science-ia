@@ -2,7 +2,7 @@
 
 ## Fonte normativa e escopo
 
-O enunciado original em [projeto_modulo_1.md](../projeto_modulo_1.md) é a referência para os requisitos da entrega. Este documento detalha esse escopo; requisitos técnicos adicionais são extensões e devem ser identificados como tais. A matriz [alinhamento-enunciado.md](alinhamento-enunciado.md) registra as escolhas do projeto e o atendimento confirmado no código.
+O enunciado original em [projeto_modulo_1.md](projeto_modulo_1.md) é a referência para os requisitos da entrega. Este documento detalha esse escopo; requisitos técnicos adicionais são extensões e devem ser identificados como tais. As escolhas da Parte 2 ([projeto_final.pdf](projeto_final.pdf)) e o estado da implementação estão em [analise-implementacao.md](analise-implementacao.md).
 
 O enunciado permite API REST pública ou JSON simulado e cita SQLite ou PostgreSQL. A implementação usa uma API FastAPI local que serve JSON simulado e Azure SQL. A fonte simulada se enquadra numa alternativa permitida; Azure SQL diverge das opções de banco e precisa de confirmação para a entrega.
 

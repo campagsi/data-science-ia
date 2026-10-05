@@ -5,6 +5,15 @@ __pycache__
 .coverage
 htmlcov
 
+## Rafael
 CLAUDE.md
 COPILOT.md
 impacta.sql
+
+# Logs de execução e de rejeitados
+logs/
+
+# Dados do Data Lake (a Bronze contém dado pessoal em claro); mantém só a estrutura
+data_lake/**
+!data_lake/**/
+!data_lake/**/.gitkeep

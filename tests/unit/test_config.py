@@ -19,7 +19,31 @@ def test_load_config_retorna_settings(monkeypatch):
     assert settings.mock_api == "http://localhost:8000"
 
 
-@pytest.mark.parametrize("variavel", ["AZURE_SQL_CONNECTIONSTRING", "MOCK_API"])
+def test_load_config_le_chaves_de_seguranca_e_fonte(monkeypatch):
+    monkeypatch.setenv("CHAVE_CRIPTOGRAFIA", " chave ")
+    monkeypatch.setenv("PEPPER_HASH", " pepper ")
+    monkeypatch.setenv("FONTE_DADOS", " API_ESTACOES ")
+
+    settings = config.load_config()
+
+    assert settings.chave_criptografia == "chave"
+    assert settings.pepper_hash == "pepper"
+    assert settings.fonte_dados == "API_ESTACOES"
+
+
+def test_load_config_usa_padroes_para_variaveis_opcionais(monkeypatch):
+    monkeypatch.delenv("PEPPER_HASH", raising=False)
+    monkeypatch.setenv("FONTE_DADOS", "  ")
+
+    settings = config.load_config()
+
+    assert settings.pepper_hash == ""
+    assert settings.fonte_dados == config.FONTE_DADOS_PADRAO
+
+
+@pytest.mark.parametrize(
+    "variavel", ["AZURE_SQL_CONNECTIONSTRING", "MOCK_API", "CHAVE_CRIPTOGRAFIA"]
+)
 def test_load_config_exige_variavel(monkeypatch, variavel):
     monkeypatch.setenv(variavel, "   ")
 

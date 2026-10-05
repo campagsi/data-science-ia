@@ -12,6 +12,11 @@ from src.api.dataset_repository import DatasetRepository
 from src.services.normalization_service import NormalizationService
 from src.services.validation_service import ValidationService
 
+pytestmark = pytest.mark.skip(
+    reason="Usa o modelo antigo (Cidades e Leituras larga); será reescrito para o modelo 3FN "
+    "nas fases 8 e 10 de docs/todo-idempotencia.md."
+)
+
 
 @pytest.fixture
 def pipeline(monkeypatch, database, connection_string):

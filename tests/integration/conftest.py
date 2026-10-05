@@ -9,12 +9,24 @@ master de uma instância de teste, por exemplo:
 Cada sessão cria um banco descartável e o remove ao final.
 """
 import os
+import re
 import uuid
+from pathlib import Path
 
 import pytest
 
 MASTER = os.getenv("TEST_SQL_MASTER_CONNECTIONSTRING", "")
-TABELAS = ("Leituras", "Estacoes", "Operadores", "Cidades")
+RAIZ = Path(__file__).resolve().parents[2]
+# Ordem de limpeza: tabelas filhas antes das mães.
+TABELAS = (
+    "Leitura_Itens",
+    "Leituras",
+    "Parametros",
+    "Estacoes",
+    "Operadores",
+    "Municipios",
+    "Estados",
+)
 
 
 def _admin(sql: str) -> None:
@@ -24,24 +36,20 @@ def _admin(sql: str) -> None:
         cursor.execute(sql)
 
 
+def _lotes(script: Path) -> list[str]:
+    """Separa um script SQL nos lotes delimitados por GO."""
+    texto = script.read_text(encoding="utf-8-sig")
+    return [lote for lote in re.split(r"^\s*GO\s*$", texto, flags=re.MULTILINE | re.IGNORECASE) if lote.strip()]
+
+
 def _criar_schema(database) -> None:
-    """
-    Cria o schema atual de criar_tabelas.py em banco vazio.
-
-    criar_tabelas() falha em banco vazio porque __criar_tabela_estacoes()
-    executa ALTER TABLE Leituras antes de a tabela existir (pendência da
-    Fase 7). Uma tabela Leituras provisória contorna a falha sem alterar o
-    schema produzido.
-    """
-    import src.database.criar_tabelas as schema
-
-    schema.database = database
-    getattr(schema, "__criar_tabela_cidades")()
-    getattr(schema, "__criar_tabela_operadores")()
-    database.execute("CREATE TABLE dbo.Leituras (fonte VARCHAR(100))")
-    getattr(schema, "__criar_tabela_estacoes")()
-    database.execute("DROP TABLE dbo.Leituras")
-    getattr(schema, "__criar_tabela_leituras")()
+    """Aplica o DDL, as migrations em ordem de nome (V001, V002...) e o DML de domínio."""
+    scripts = [RAIZ / "sql" / "ddl_banco_relacional.sql"]
+    scripts += sorted((RAIZ / "sql" / "migrations").glob("V*.sql"))
+    scripts.append(RAIZ / "sql" / "dml_populacao.sql")
+    for script in scripts:
+        for lote in _lotes(script):
+            database.execute(lote)
 
 
 @pytest.fixture(scope="session")
@@ -68,16 +76,22 @@ def connection_string():
 
 @pytest.fixture
 def database(connection_string):
-    """Conexão com o banco de teste, com as tabelas vazias a cada teste."""
-    import src.database.criar_tabelas as schema
+    """
+    Conexão com o banco de teste, limpo a cada teste.
+
+    Todas as tabelas são esvaziadas e o DML de domínio é reaplicado, para que
+    cada teste comece só com os 27 estados e os 11 parâmetros conhecidos
+    (sem parâmetros cadastrados por um teste anterior).
+    """
     from src.database.connection import DatabaseConnection
 
     db = DatabaseConnection(connection_string)
     for tabela in TABELAS:
         db.execute(f"DELETE FROM dbo.{tabela}")
-        # Reinicia o IDENTITY: o pipeline analisa cidade_id=1, fixo em run_pipeline().
-        db.execute(f"DBCC CHECKIDENT ('dbo.{tabela}', RESEED, 0) WITH NO_INFOMSGS")
-    schema.database = db
+        if tabela != "Leitura_Itens":  # PK composta, sem IDENTITY
+            db.execute(f"DBCC CHECKIDENT ('dbo.{tabela}', RESEED, 0) WITH NO_INFOMSGS")
+    for lote in _lotes(RAIZ / "sql" / "dml_populacao.sql"):
+        db.execute(lote)
     return db
 
 

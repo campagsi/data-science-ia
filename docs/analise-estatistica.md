@@ -1,6 +1,6 @@
 # Análise estatística
 
-O enunciado original pede média, mediana, desvio padrão, IQR e identificação de outliers pela regra IQR, por parâmetro ambiental. Também pede consultas/agregações SQL por estação e filtros por período. Agrupamentos adicionais por cidade, operador e fonte são extensões, não requisitos originais. A [matriz de alinhamento](alinhamento-enunciado.md) registra o estado atual.
+O enunciado original pede média, mediana, desvio padrão, IQR e identificação de outliers pela regra IQR, por parâmetro ambiental. Também pede consultas/agregações SQL por estação e filtros por período. Agrupamentos adicionais por cidade, operador e fonte são extensões, não requisitos originais. O estado atual da implementação está em [analise-implementacao.md](analise-implementacao.md).
 
 ## Objetivo
 

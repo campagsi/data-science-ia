@@ -165,5 +165,8 @@ def importar_dados() -> list[dict]:
 
 
 if __name__ == "__main__":
+    from src.logger import configurar_logs, logger
+
+    configurar_logs()
     dados = importar_dados()
-    print(f"Dados recebidos da API: {len(dados)} registros.")
+    logger.info(f"Dados recebidos da API: {len(dados)} registros.")

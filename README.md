@@ -1,6 +1,6 @@
 ﻿# Pipeline de Monitoramento e Análise de Dados Ambientais
 
-O enunciado original está em [projeto_modulo_1.md](projeto_modulo_1.md). A matriz [docs/alinhamento-enunciado.md](docs/alinhamento-enunciado.md) distingue os requisitos do trabalho, as decisões posteriores e o estado confirmado da implementação.
+O enunciado da Parte 1 está em [docs/projeto_modulo_1.md](docs/projeto_modulo_1.md) e o da Parte 2 (projeto final) em [docs/projeto_final.pdf](docs/projeto_final.pdf). O que muda na Parte 2, as decisões e o estado da implementação estão em [docs/analise-implementacao.md](docs/analise-implementacao.md).
 
 ## Visão geral
 
@@ -49,7 +49,7 @@ A proposta do projeto é uma arquitetura em camadas, com as seguintes responsabi
 
 ```text
 Data-Science-Ia/
-├── data/                       # Data Lakehouse
+├── data_lake/                  # Data Lakehouse
 │   ├── bronze/                 # dados brutos, como chegam da ingestão
 │   ├── silver/                 # dados limpos e validados
 │   └── gold/                   # dados agregados para análise
@@ -62,23 +62,28 @@ Data-Science-Ia/
 │   ├── manual-execucao.md
 │   ├── modelagem-banco.md
 │   └── ...
+├── logs/                       # logs de execução e de rejeitados (fora do Git)
 ├── src/
 │   ├── api/                    # API FastAPI que disponibiliza o dataset
-│   ├── database/               # conexão, transação e criação do schema
+│   ├── cli/                    # interface de consulta no terminal (rich)
+│   ├── database/               # conexão e transação (o schema vem de sql/)
 │   ├── ingestion/              # cliente da API e funções de importação
 │   ├── models/                 # modelos Pydantic das entidades
 │   ├── repository/             # acesso ao banco por entidade
 │   ├── services/               # normalização, validação, análise e relatório
-│   └── config.py               # carregamento das variáveis de ambiente
+│   ├── config.py               # carregamento das variáveis de ambiente
+│   ├── logger.py               # configuração única de logs
+│   └── security.py             # anonimização (SHA-256) e criptografia (Fernet) de dados pessoais
 ├── sql/
-│   ├── ddl_banco_relacional.sql  # criação das tabelas
+│   ├── migrations/               # alterações incrementais do schema (VNNN__descricao.sql)
+│   ├── ddl_banco_relacional.sql  # estado completo e atual do schema
 │   ├── dml_populacao.sql         # carga de dados
 │   └── queries_analiticas.sql    # consultas analíticas
 ├── tests/
 │   ├── unit/                   # testes sem banco e sem rede
 │   ├── integration/            # SQL Server descartável; ignorados sem configuração
 │   └── test_quality_stat.py    # testes de qualidade e estatística
-├── main.py                     # orquestração do pipeline (run_pipeline)
+├── main.py                     # inicialização (iniciar_aplicacao), CLI e orquestração do pipeline (run_pipeline)
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -97,7 +102,8 @@ Esta visão geral está alinhada com os documentos detalhados do projeto:
 - [docs/dicionario-dados.md](docs/dicionario-dados.md) — tipos, unidades e regras dos campos
 - [docs/requisitos.md](docs/requisitos.md) — requisitos funcionais e regras de negócio
 - [docs/analise-estatistica.md](docs/analise-estatistica.md) — métricas, agrupamentos e outliers
-- [docs/analise-implementacao.md](docs/analise-implementacao.md) — plano de refatoração por fases e relatórios de implementação
+- [docs/analise-implementacao.md](docs/analise-implementacao.md) — o que muda com o novo banco 3FN (Parte 2) e relatórios de implementação por fase
+- [docs/todo-idempotencia.md](docs/todo-idempotencia.md) — fases de idempotência, campos nulos e log de rejeitados
 - [docs/plano-testes.md](docs/plano-testes.md) — estratégia e cenários de teste
 - [docs/seguranca-lgpd.md](docs/seguranca-lgpd.md) — tratamento de dados e credenciais
 - [docs/versionamento.md](docs/versionamento.md) — branches e evolução do contrato
@@ -111,7 +117,7 @@ Os testes usam `pytest` e ficam em `tests/`. Para executá-los, a partir da past
 python -m pytest tests
 ```
 
-Os testes unitários não dependem da API nem do banco. Os de integração só rodam com um SQL Server de teste configurado. O guia completo e a matriz de cenários estão em [docs/plano-testes.md](docs/plano-testes.md).
+Os testes unitários não dependem da API, do banco nem das chaves do `.env`; incluem os de segurança (`test_security.py`) e de logs (`test_logger.py`). Os de integração só rodam com um SQL Server de teste configurado. O guia completo, os comandos e a matriz de cenários estão em [docs/plano-testes.md](docs/plano-testes.md).
 
 ## Objetivo do sistema
 
@@ -133,4 +139,4 @@ Os registros incluem dados meteorológicos e de qualidade da água, como tempera
 
 ## Status
 
-A aplicação usa uma API FastAPI local para servir JSON simulado, opção permitida pelo enunciado, mas usa Azure SQL em vez de SQLite ou PostgreSQL, opções citadas no trabalho. Permanecem parciais a anonimização/exclusão de identificadores, a apresentação de IQR como métrica, a agregação SQL por estação e a criação do schema em banco vazio. Consulte a matriz de alinhamento para as evidências, limitações e demais pendências.
+A aplicação usa uma API FastAPI local para servir JSON simulado, opção permitida pelo enunciado, mas usa Azure SQL em vez de SQLite ou PostgreSQL, opções citadas no trabalho. Permanecem parciais a anonimização/exclusão de identificadores, a apresentação de IQR como métrica, a agregação SQL por estação e a criação do schema em banco vazio. As pendências e o plano de implementação estão em [docs/analise-implementacao.md](docs/analise-implementacao.md) e [docs/todo-idempotencia.md](docs/todo-idempotencia.md).

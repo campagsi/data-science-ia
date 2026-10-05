@@ -4,11 +4,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+FONTE_DADOS_PADRAO = "API_MOCK"
+
 
 @dataclass(frozen=True)
 class Settings:
     mock_api: str
     azure_sql_connectionstring: str
+    chave_criptografia: str = ""
+    pepper_hash: str = ""
+    fonte_dados: str = FONTE_DADOS_PADRAO
 
 
 def load_config() -> Settings:
@@ -23,7 +28,15 @@ def load_config() -> Settings:
     if not mock_api:
         raise ValueError("A variável MOCK_API deve estar configurada.")
 
+    chave_criptografia = os.getenv("CHAVE_CRIPTOGRAFIA", "").strip()
+    if not chave_criptografia:
+        raise ValueError("A variável CHAVE_CRIPTOGRAFIA deve estar configurada.")
+
     return Settings(
         mock_api=mock_api,
         azure_sql_connectionstring=connection_string,
+        chave_criptografia=chave_criptografia,
+        # Opcional: sem pepper, o hash é SHA-256 puro (decisão D8).
+        pepper_hash=os.getenv("PEPPER_HASH", "").strip(),
+        fonte_dados=os.getenv("FONTE_DADOS", "").strip() or FONTE_DADOS_PADRAO,
     )

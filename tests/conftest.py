@@ -11,6 +11,9 @@ sys.path.insert(0, str(RAIZ))
 # existentes, então nenhum teste acessa o banco real por acidente.
 os.environ["AZURE_SQL_CONNECTIONSTRING"] = "Server=nao-usar-em-testes;Database=x"
 os.environ["MOCK_API"] = "http://api-de-teste"
+# Chave Fernet válida usada só nos testes.
+os.environ["CHAVE_CRIPTOGRAFIA"] = "4N8bS6kA2fT0yX1qV3mR9pL7cD5hJ2wE8uZ0tY4iO6g="
+os.environ["PEPPER_HASH"] = "pepper-de-teste"
 
 
 @pytest.fixture

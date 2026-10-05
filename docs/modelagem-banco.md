@@ -2,7 +2,7 @@
 
 ## Requisito original e decisão de tecnologia
 
-O enunciado original pede banco relacional SQLite ou PostgreSQL e, no mínimo, as estruturas de estações e leituras. O projeto ampliou o modelo para cidades, operadores, estações e leituras, mas adotou Azure SQL. Registre Azure SQL como desvio a confirmar com a avaliação; este documento não altera as opções originais. Consulte a [matriz de alinhamento](alinhamento-enunciado.md).
+O enunciado original pede banco relacional SQLite ou PostgreSQL e, no mínimo, as estruturas de estações e leituras. O projeto ampliou o modelo para cidades, operadores, estações e leituras, mas adotou Azure SQL. Registre Azure SQL como desvio a confirmar com a avaliação; este documento não altera as opções originais. O novo modelo 3FN da Parte 2 e o que muda em relação a este documento estão em [analise-implementacao.md](analise-implementacao.md).
 
 ## Visão Geral
 O modelo foi estruturado de forma relacional para representar a relação entre cidades, operadores, estações de monitoramento e as leituras coletadas ao longo do tempo. A estrutura permite que cada cidade tenha várias estações, que cada operador seja responsável por diversas estações e que cada estação registre múltiplas medições em diferentes datas e horários.
@@ -146,7 +146,9 @@ As restrições de unicidade e a idempotência listadas acima são decisões de 
 
 ## Situação atual do schema
 
-O schema criado por `src/database/criar_tabelas.py` ainda não implementa todo o modelo acima:
+> **Parte 2:** o schema descrito nesta seção é o modelo antigo da Parte 1, criado pelo `src/database/criar_tabelas.py`, que foi removido. O banco atual segue o modelo 3FN de [sql/ddl_banco_relacional.sql](../sql/ddl_banco_relacional.sql), evoluído por `sql/migrations/` (ver [analise-implementacao.md](analise-implementacao.md) e a seção 4 de [manual-execucao.md](manual-execucao.md)). Esta seção será reescrita na fase 11 do TODO.
+
+O schema antigo ainda não implementava todo o modelo acima:
 
 - `Operadores` não possui a coluna `ativo`; o campo `operador_ativo` é validado, mas não é persistido;
 - `Operadores` possui `cidade_id` (chave estrangeira para `Cidades`), que não aparece no diagrama;

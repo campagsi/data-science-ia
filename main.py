@@ -1,13 +1,13 @@
-import sys
 from datetime import date
 from typing import Any
 
 from src.cli.console_app import Console_APP
-from src.config import load_config
+from src.config import Settings, load_config
 from src.database.connection import DatabaseConnection
-from src.database.criar_tabelas import criar_tabelas
 from src.ingestion.data_client import DataClient
+from src.logger import configurar_logs, logger
 from src.repository.leitura_repository import LeituraRepository
+from src.security import configurar_seguranca
 from src.services.analytics_service import AnaliticsService
 from src.services.normalization_service import NormalizationService
 from src.services.report_service import ReportService
@@ -21,8 +21,8 @@ def run_pipeline() -> dict[str, Any]:
     normalized_data = NormalizationService().normalize(raw_data)
     validated_data = ValidationService().validate_data(normalized_data)
 
+    # O schema é mantido por sql/ddl_banco_relacional.sql e sql/migrations/.
     database = DatabaseConnection(settings.azure_sql_connectionstring)
-    criar_tabelas()
     LeituraRepository(database).save_readings(validated_data)
 
     service = AnaliticsService(database)
@@ -34,18 +34,28 @@ def run_pipeline() -> dict[str, Any]:
     return ReportService().generate_report(indicadores)
 
 
+def iniciar_aplicacao() -> Settings:
+    """Prepara logs, configuração e chaves antes de qualquer etapa da aplicação."""
+    configurar_logs()
+    settings = load_config()
+    configurar_seguranca(settings.chave_criptografia, settings.pepper_hash)
+    logger.info("Configuração carregada e segurança inicializada.")
+    return settings
+
+
 def _exibir_resultados(resultados: dict[str, Any]) -> None:
-    """Exibe no console o relatório textual produzido pelo pipeline."""
+    """Registra no log o relatório textual produzido pelo pipeline."""
     texto = ReportService().format_report(resultados)
     if texto:
-        print(texto)
+        logger.info(f"Relatório da execução:\n{texto}")
 
 
 if __name__ == "__main__":
     try:
+        iniciar_aplicacao()
         # _exibir_resultados(run_pipeline())
         console_app = Console_APP()
         console_app.run()
     except Exception as erro:
-        print(f"{type(erro).__name__}: {erro}", file=sys.stderr)
+        logger.critical(f"{type(erro).__name__}: {erro}")
         raise SystemExit(1) from erro
