@@ -30,7 +30,7 @@ class Extracao_Dados:
 
     def extrair_dados_bronze(self, data_referencia, dados):
         if not dados:
-            logger.warn("Não há dados a serem importados.")
+            logger.warning("Não há dados a serem importados.")
             return
 
         logger.info(
@@ -50,7 +50,7 @@ class Extracao_Dados:
         df_bruto["nome_fonte"] = ""  # Informar a fonte
 
         # ==== Atenção ======
-        df_bruto["is_valid"] = True  # Acrescentado para testes deve ser removido
+        # df_bruto["is_valid"] = True  # Acrescentado para testes deve ser removido
 
         logger.info("Realizando separação de dados válidos e inválidos...")
         # Separa os dados Aprovados dos Rejeitados em DFs distintos
@@ -64,17 +64,26 @@ class Extracao_Dados:
 
             logger.info("Salvando arquivo JSON...")
             df_bruto_validos.to_json(
-                arquivo_saida, orient="records", indent=4, force_ascii=False
+                arquivo_saida,
+                orient="records",
+                indent=4,
+                force_ascii=False,
+                date_format="iso",
             )
 
         if not df_bruto_invalidos.empty:
-            logger.warn("Dados inválidos encontrados...")
+            logger.warning("Dados inválidos encontrados...")
             arquivo_saida = os.path.join(
                 self.diretorio_bronze, f"log_cidade_operadora_{data_referencia}.csv"
             )
             logger.info("Salvando arquivo de log...")
             df_bruto_invalidos.to_csv(
-                arquivo_saida, index=False, sep=";", encoding="utf-8-sig", decimal=","
+                arquivo_saida,
+                index=False,
+                sep=";",
+                encoding="utf-8-sig",
+                decimal=",",
+                date_format="iso",
             )
 
         logger.info(f"Total de dados válidos: {len(df_bruto_validos)}")
