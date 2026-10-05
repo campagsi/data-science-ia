@@ -44,6 +44,8 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 
 Crie `Data-Science-Ia/.env` com base no `.env.example` e informe a string do Azure SQL:
 
+> **Compatibilidade com o enunciado:** a configuração e o código atuais usam Azure SQL. O enunciado original cita SQLite ou PostgreSQL; confirme que Azure SQL é aceito para a entrega. O manual descreve a implementação atual, não altera essa exigência.
+
 ```env
 AZURE_SQL_CONNECTIONSTRING="Server=tcp:seu-servidor.database.windows.net,1433;Database=seu_banco;UID=seu_usuario;PWD=sua_senha;Encrypt=yes;TrustServerCertificate=no"
 MOCK_API="http://127.0.0.1:8000"

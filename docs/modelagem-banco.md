@@ -1,5 +1,9 @@
 # Modelo de Dados
 
+## Requisito original e decisão de tecnologia
+
+O enunciado original pede banco relacional SQLite ou PostgreSQL e, no mínimo, as estruturas de estações e leituras. O projeto ampliou o modelo para cidades, operadores, estações e leituras, mas adotou Azure SQL. Registre Azure SQL como desvio a confirmar com a avaliação; este documento não altera as opções originais. Consulte a [matriz de alinhamento](alinhamento-enunciado.md).
+
 ## Visão Geral
 O modelo foi estruturado de forma relacional para representar a relação entre cidades, operadores, estações de monitoramento e as leituras coletadas ao longo do tempo. A estrutura permite que cada cidade tenha várias estações, que cada operador seja responsável por diversas estações e que cada estação registre múltiplas medições em diferentes datas e horários.
 
@@ -138,6 +142,8 @@ Essa organização evita redundância de informações e facilita consultas por 
 - `Leituras` deve possuir uma restrição única para `estacao_id` e `data_hora`.
 - Os campos `latitude`, `longitude`, `ativa` e os valores ambientais devem ser persistidos após a normalização do JSON, nunca diretamente como texto bruto.
 
+As restrições de unicidade e a idempotência listadas acima são decisões de robustez posteriores ao mínimo exigido no enunciado. Como ainda não existem no schema, o reprocessamento pode duplicar dados.
+
 ## Situação atual do schema
 
 O schema criado por `src/database/criar_tabelas.py` ainda não implementa todo o modelo acima:
@@ -149,3 +155,7 @@ O schema criado por `src/database/criar_tabelas.py` ainda não implementa todo o
 - os textos usam `VARCHAR`, os valores numéricos `FLOAT` e `data_hora` usa `DATETIME`.
 
 A persistência de um lote ocorre em uma única transação (`DatabaseConnection.transaction()`): se qualquer inserção falhar, nada do lote é gravado.
+
+## Consultas SQL do trabalho
+
+O repositório implementa `JOIN` entre leituras e estações e filtros por data/período. As estatísticas atuais são calculadas em pandas, não com `GROUP BY` SQL. O script [impacta.sql](../impacta.sql) demonstra junção e filtro temporal, mas não a agregação SQL por estação; esse item ainda está parcial.

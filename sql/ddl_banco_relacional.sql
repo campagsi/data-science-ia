@@ -1,0 +1,1 @@
+-- DDL do banco relacional (CREATE TABLE, chaves e índices).

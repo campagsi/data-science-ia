@@ -1,5 +1,7 @@
 ﻿# Pipeline de Monitoramento e Análise de Dados Ambientais
 
+O enunciado original está em [projeto_modulo_1.md](projeto_modulo_1.md). A matriz [docs/alinhamento-enunciado.md](docs/alinhamento-enunciado.md) distingue os requisitos do trabalho, as decisões posteriores e o estado confirmado da implementação.
+
 ## Visão geral
 
 Este projeto tem como objetivo coletar, validar, persistir e analisar dados ambientais de estações de monitoramento. O fluxo principal do sistema segue uma arquitetura em camadas, com foco em separar responsabilidades entre configuração, domínio, persistência e análise.
@@ -47,6 +49,10 @@ A proposta do projeto é uma arquitetura em camadas, com as seguintes responsabi
 
 ```text
 Data-Science-Ia/
+├── data/                       # Data Lakehouse
+│   ├── bronze/                 # dados brutos, como chegam da ingestão
+│   ├── silver/                 # dados limpos e validados
+│   └── gold/                   # dados agregados para análise
 ├── docs/
 │   ├── diagramas/              # atividade, contexto e sequência
 │   ├── analise-implementacao.md
@@ -64,13 +70,17 @@ Data-Science-Ia/
 │   ├── repository/             # acesso ao banco por entidade
 │   ├── services/               # normalização, validação, análise e relatório
 │   └── config.py               # carregamento das variáveis de ambiente
+├── sql/
+│   ├── ddl_banco_relacional.sql  # criação das tabelas
+│   ├── dml_populacao.sql         # carga de dados
+│   └── queries_analiticas.sql    # consultas analíticas
 ├── tests/
 │   ├── unit/                   # testes sem banco e sem rede
-│   └── integration/            # SQL Server descartável; ignorados sem configuração
+│   ├── integration/            # SQL Server descartável; ignorados sem configuração
+│   └── test_quality_stat.py    # testes de qualidade e estatística
 ├── main.py                     # orquestração do pipeline (run_pipeline)
 ├── requirements.txt
 ├── .env.example
-├── CLAUDE.md / COPILOT.md      # diretrizes de desenvolvimento e documentação
 └── README.md
 ```
 
@@ -123,4 +133,4 @@ Os registros incluem dados meteorológicos e de qualidade da água, como tempera
 
 ## Status
 
-A documentação está organizada em camadas para facilitar entendimento do sistema e da evolução do projeto. O README atua como visão geral, enquanto a documentação detalhada concentra os aspectos técnicos e de arquitetura.
+A aplicação usa uma API FastAPI local para servir JSON simulado, opção permitida pelo enunciado, mas usa Azure SQL em vez de SQLite ou PostgreSQL, opções citadas no trabalho. Permanecem parciais a anonimização/exclusão de identificadores, a apresentação de IQR como métrica, a agregação SQL por estação e a criação do schema em banco vazio. Consulte a matriz de alinhamento para as evidências, limitações e demais pendências.

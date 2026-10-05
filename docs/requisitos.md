@@ -1,5 +1,11 @@
 # Requisitos do sistema
 
+## Fonte normativa e escopo
+
+O enunciado original em [projeto_modulo_1.md](../projeto_modulo_1.md) é a referência para os requisitos da entrega. Este documento detalha esse escopo; requisitos técnicos adicionais são extensões e devem ser identificados como tais. A matriz [alinhamento-enunciado.md](alinhamento-enunciado.md) registra as escolhas do projeto e o atendimento confirmado no código.
+
+O enunciado permite API REST pública ou JSON simulado e cita SQLite ou PostgreSQL. A implementação usa uma API FastAPI local que serve JSON simulado e Azure SQL. A fonte simulada se enquadra numa alternativa permitida; Azure SQL diverge das opções de banco e precisa de confirmação para a entrega.
+
 ## 1. Visão geral
 
 O sistema tem como objetivo coletar, validar, persistir e analisar dados ambientais de estações de monitoramento. A solução deve funcionar como um pipeline de dados, permitindo a ingestão de informações vindas de fontes externas, a organização em banco relacional e a geração de indicadores estatísticos para apoio à análise.
@@ -48,7 +54,7 @@ Critérios:
 - falhar com mensagem clara se alguma informação obrigatória estiver ausente.
 
 ### RF02 - Ingestão de dados
-O sistema deve consumir dados ambientais de uma API REST, configurada em `MOCK_API`.
+O sistema deve obter dados ambientais de uma API REST pública ou de uma fonte JSON simulada. Na implementação atual, `MOCK_API` aponta para a API FastAPI local do projeto, que disponibiliza o dataset JSON.
 
 Critérios:
 - realizar a leitura dos dados em formato estruturado;
@@ -56,14 +62,14 @@ Critérios:
 - identificar falhas quando a fonte estiver indisponível ou retornar dados inválidos.
 
 ### RF03 - Validação de integridade dos dados
-O sistema deve normalizar e verificar se os dados recebidos possuem estrutura e tipo corretos antes de serem persistidos.
+O sistema deve interpretar o JSON e tratar inconsistências da carga inicial, incluindo campos ausentes ou nulos, antes da persistência.
 
 Critérios:
-- validar campos obrigatórios;
-- converter strings numéricas para tipos numéricos internos;
-- converter strings booleanas para booleanos sem aceitar valores ambíguos;
-- confirmar datas, identificadores e intervalos físicos;
-- rejeitar registros incompletos ou inconsistentes.
+- converter o JSON em estruturas nativas do Python;
+- aplicar regras explícitas para campos ausentes/nulos, distinguindo ausência de zero;
+- não persistir valores inconsistentes sem tratamento.
+
+Validação de campos obrigatórios, conversão de tipos e intervalos físicos são regras detalhadas do contrato adotado pelo projeto. Atualmente um registro obrigatório inválido rejeita o lote inteiro; não existe descarte e recuperação individual por registro.
 
 ### RF04 - Tratamento de dados sensíveis
 O sistema deve aplicar regras para reduzir ou eliminar dados sensíveis antes do armazenamento.
@@ -74,29 +80,32 @@ Critérios:
 - garantir que dados pessoais não sejam armazenados sem necessidade.
 
 ### RF05 - Persistência no banco
-O sistema deve salvar os dados validados em banco relacional.
+O sistema deve salvar os dados limpos em banco relacional SQLite ou PostgreSQL, conforme o enunciado original.
 
 Critérios:
-- persistir informações de cidades, operadores, estações e leituras;
-- manter relacionamento entre as entidades;
-- impedir duplicidade por estação e instante de medição;
+- manter, no mínimo, as tabelas relacionadas de estações e leituras temporais;
+- inserir os dados usando scripts Python;
 - registrar falhas de gravação com retorno de erro adequado.
 
+A implementação atual usa Azure SQL e amplia o modelo com cidades e operadores; registre isso como decisão posterior, sem alterar o requisito original. Unicidade e idempotência por estação/instante são melhorias adicionais.
+
 ### RF06 - Consulta e recuperação de dados
-O sistema deve consultar os dados armazenados por estação, cidade, operador e intervalo de tempo.
+O sistema deve consultar dados por estação e escrever consultas SQL com agregações por estação, junções (`JOIN`) e filtros por intervalo de datas.
 
 Critérios:
 - permitir filtros por período;
 - recuperar dados por identificador da estação;
-- suportar consultas simples e agregadas.
+- demonstrar agregações SQL por estação e consultas com `JOIN`.
+
+Consulta por cidade e operador é extensão do modelo atual, não requisito original.
 
 ### RF07 - Cálculo estatístico
 O sistema deve calcular métricas estatísticas a partir dos dados persistidos.
 
 Critérios:
-- calcular média, mediana e desvio padrão;
+- calcular média, mediana, desvio padrão e intervalo interquartil (IQR);
 - identificar variações relevantes;
-- possibilitar agrupamento por estação, cidade ou período.
+- calcular por parâmetro ambiental, com contexto de estação e período.
 
 ### RF08 - Identificação de outliers
 O sistema deve identificar registros que estejam fora do padrão esperado.
@@ -107,14 +116,14 @@ Critérios:
 - registrar os registros considerados atípicos.
 
 ### RF09 - Geração de relatório
-O sistema deve gerar um relatório final com os principais indicadores e resultados da análise.
+O sistema deve apresentar no terminal ou em relatório textual os principais indicadores e resultados da análise.
 
 Critérios:
 - apresentar resultados em formato legível;
 - incluir dados relevantes para tomada de decisão;
-- permitir geração textual ou em arquivo exportável.
+- disponibilizar o resultado em formato textual legível; exportação em arquivo é opcional.
 
-### RF10 - Tratamento de erro e observabilidade
+### RF10 - Tratamento de erro e observabilidade (extensão do projeto)
 O sistema deve registrar eventos de falha durante o processamento.
 
 Critérios:
@@ -122,7 +131,9 @@ Critérios:
 - não expor credenciais em logs;
 - manter rastreabilidade do fluxo executado.
 
-## 5. Requisitos não funcionais
+## 5. Requisitos não funcionais e critérios técnicos complementares
+
+Os itens seguintes detalham boas práticas para a solução. Quando não estiverem explicitamente no enunciado original, devem ser entendidos como critérios adicionais do projeto.
 
 ### RNF01 - Segurança
 O sistema deve proteger informações sensíveis e evitar vazamento de credenciais.
@@ -142,14 +153,16 @@ As etapas do pipeline devem ser testáveis separadamente, especialmente validaç
 ### RNF06 - Portabilidade
 O sistema deve funcionar em ambientes de execução compatíveis com Python e banco relacional, com ajustes mínimos de configuração.
 
-## 6. Regras de negócio
+## 6. Regras do domínio e extensões
+
+As regras de integridade abaixo detalham o modelo relacional adotado. A regra de idempotência é uma melhoria adicional, não um requisito literal do enunciado.
 
 1. Toda estação deve pertencer a uma cidade válida.
 2. Toda leitura deve estar associada a uma estação existente.
 3. Campos como temperatura, umidade, pressão, pH, oxigênio dissolvido, condutividade e turbidez devem ser validados antes da persistência.
 4. Registros incompletos ou inválidos não devem ser armazenados sem tratamento.
 5. Dados sensíveis devem ser removidos ou mascarados antes do armazenamento.
-6. A análise deve considerar o contexto de estação, cidade e período para produzir resultados relevantes.
+6. A análise deve considerar o contexto da estação e do período; agrupamento por cidade é uma extensão.
 7. O sistema deve registrar falhas para facilitar manutenção e correção.
 8. O processamento repetido do mesmo par `estacao_codigo` e `data_hora` não deve criar uma nova leitura.
 

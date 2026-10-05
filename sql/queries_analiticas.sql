@@ -1,0 +1,1 @@
+-- Consultas analíticas sobre o banco relacional.

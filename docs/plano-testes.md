@@ -1,5 +1,7 @@
 # Estratégia e Plano de Testes
 
+Este plano contém cenários do enunciado original e melhorias adicionadas durante a evolução do projeto. Idempotência/upsert, rejeição de data futura e descarte individual com log são extensões, não requisitos expressos no enunciado. O atendimento do escopo original está em [alinhamento-enunciado.md](alinhamento-enunciado.md).
+
 ## 1. Visão Geral
 Este documento formaliza as práticas de garantia da qualidade de software adotadas no pipeline, detalhando a separação de testes unitários, testes de integração e validação de contratos sintéticos.
 
