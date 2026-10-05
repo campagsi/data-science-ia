@@ -1,7 +1,8 @@
-from datetime import date
 import sys
+from datetime import date
 from typing import Any
 
+from src.cli.console_app import Console_APP
 from src.config import load_config
 from src.database.connection import DatabaseConnection
 from src.database.criar_tabelas import criar_tabelas
@@ -11,6 +12,7 @@ from src.services.analytics_service import AnaliticsService
 from src.services.normalization_service import NormalizationService
 from src.services.report_service import ReportService
 from src.services.validation_service import ValidationService
+
 
 def run_pipeline() -> dict[str, Any]:
     """Coordena configuração, ingestão, persistência, análise e relatório."""
@@ -41,7 +43,9 @@ def _exibir_resultados(resultados: dict[str, Any]) -> None:
 
 if __name__ == "__main__":
     try:
-        _exibir_resultados(run_pipeline())
+        # _exibir_resultados(run_pipeline())
+        console_app = Console_APP()
+        console_app.run()
     except Exception as erro:
         print(f"{type(erro).__name__}: {erro}", file=sys.stderr)
         raise SystemExit(1) from erro

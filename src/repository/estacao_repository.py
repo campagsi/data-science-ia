@@ -13,17 +13,20 @@ class EstacaoRepository:
         if not result:
             return None
 
-        return {
-            "id": result[0],
-            "codigo": result[1],
-            "nome": result[2],
-            "cidade_id": result[3],
-            "operador_id": result[4],
-            "latitude": result[5],
-            "longitude": result[6],
-            "ativa": result[7],
-            "tipo": result[8],
-        }
+        return [
+            {
+                "id": linha[0],
+                "codigo": linha[1],
+                "nome": linha[2],
+                "cidade_id": linha[3],
+                "operador_id": linha[4],
+                "latitude": linha[5],
+                "longitude": linha[6],
+                "ativa": linha[7],
+                "tipo": linha[8],
+            }
+            for linha in result
+        ]
 
     def get_by_codigo(self, codigo: str) -> dict | None:
         query = "SELECT id, codigo, nome, cidade_id, operador_id, latitude, longitude, ativa, tipo FROM dbo.Estacoes WHERE codigo = ?"
