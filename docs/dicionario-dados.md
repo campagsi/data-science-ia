@@ -1,45 +1,64 @@
 # Dicionário de dados
 
-> **Parte 2:** o payload da API mudou (uma medição vira cinco campos: valor, `_unidade_medida`, `_codigo`, `_tipo_codigo` e `data_hora_leitura_`; operador com CPF, nome completo e e-mail). O mapeamento atual do payload para o banco, o formato normalizado e as regras de nulos estão nas seções 3 e 4 de [analise-implementacao.md](analise-implementacao.md). Este documento descreve o contrato da Parte 1 e será reescrito na fase 11 do [TODO](todo-idempotencia.md).
+Campos do payload da API (`src/api/data_set.json`), o tipo depois da normalização e o destino no banco. As regras de normalização e validação estão em [contrato-dados.md](contrato-dados.md); as colunas, em [modelagem-banco.md](modelagem-banco.md).
 
 ## Convenções
 
-O JSON de origem entrega todos os valores como texto. A coluna **Tipo interno** representa o tipo após a normalização e antes da persistência.
+- **Vital:** sem ele a leitura é rejeitada (completude). As medições não são vitais: a nula é descartada sozinha.
+- **Descartado:** não tem coluna no banco (decisão D5 em [analise-implementacao.md](analise-implementacao.md)).
+- Datas em ISO 8601, sem fuso.
+- Texto vazio vale como nulo.
 
-| Campo | Tipo recebido | Tipo interno | Obrigatório | Unidade / regra |
-| --- | --- | --- | --- | --- |
-| `cidade_nome` | string | string | sim | nome não vazio |
-| `cidade_estado` | string | string | sim | sigla de duas letras, em maiúsculas |
-| `operador_codigo` | string | string | sim | identificador único do operador |
-| `operador_nome` | string | string | sim | nome não vazio |
-| `operador_tipo` | string | string | sim | categoria do operador |
-| `operador_ativo` | string | boolean | sim | somente `true` ou `false` |
-| `estacao_codigo` | string | string | sim | identificador único da estação |
-| `estacao_nome` | string | string | sim | nome não vazio |
-| `estacao_latitude` | string decimal | decimal | sim | graus, entre -90 e 90 |
-| `estacao_longitude` | string decimal | decimal | sim | graus, entre -180 e 180 |
-| `estacao_ativa` | string | boolean | sim | somente `true` ou `false` |
-| `estacao_tipo` | string | string | sim | categoria da estação |
-| `data_hora` | string ISO 8601 | datetime | sim | data/hora sem fuso no payload atual |
-| `temperatura` | string decimal | decimal | não | temperatura do ar, °C |
-| `umidade` | string decimal | decimal | não | umidade relativa, % |
-| `pressao` | string decimal | decimal | não | pressão atmosférica, hPa |
-| `precipitacao` | string decimal | decimal | não | precipitação, unidade a confirmar |
-| `velocidade_vento` | string decimal | decimal | não | unidade a confirmar na origem |
-| `direcao_vento` | string decimal | decimal | não | direção, graus de 0 a 360 |
-| `radiacao_solar` | string decimal | decimal | não | unidade a confirmar na origem |
-| `temperatura_agua` | string decimal | decimal | não | temperatura da água, °C |
-| `ph` | string decimal | decimal | não | escala de 0 a 14 |
-| `oxigenio_dissolvido` | string decimal | decimal | não | unidade a confirmar na origem |
-| `condutividade` | string decimal | decimal | não | unidade a confirmar na origem |
-| `turbidez` | string decimal | decimal | não | unidade a confirmar na origem |
-| `fonte` | string | string | sim | origem do registro, por exemplo `SIMULADO` |
+## Cabeçalho da leitura
 
-## Regras de qualidade
+| Campo do payload | Tipo recebido | Tipo interno | Vital | Destino |
+|---|---|---|---|---|
+| `registro_codigo` | string | string | sim | `Leituras.codigo_registro` (chave natural) |
+| `data_hora_ciclo` | string ISO 8601 | datetime | sim | `Leituras.data_hora` |
+| `cidade_estado` | string | string, maiúsculas | sim | busca em `Estados.sigla` |
+| `municipio` | string | string | sim* | `Municipios.nome` |
+| `cidade_nome` | string | string | — | usado quando `municipio` vem nulo |
+| `cidade_codigo` | string | — | — | descartado |
+| `estacao_codigo` | string | string | sim | `Estacoes.codigo_estacao` |
+| `estacao_nome` | string | string | sim | `Estacoes.nome` |
+| `estacao_latitude` | número | float | sim | `Estacoes.latitude` (-90 a 90) |
+| `estacao_longitude` | número | float | sim | `Estacoes.longitude` (-180 a 180) |
+| `estacao_ativa`, `estacao_tipo` | boolean, string | — | — | descartados |
+| `operador_codigo` | string | string | sim | `Operadores.codigo_operador` |
+| `operador_cpf` | string | `cpf_hash` (64 hex) | sim | `Operadores.cpf_hash`; original nunca gravado |
+| `operador_nome_completo` | string | `nome_hash` (64 hex) | sim | `Operadores.nome_hash`; original nunca gravado |
+| `operador_email` | string | `email_criptografado` | sim | `Operadores.email_criptografado` (reversível) |
+| `operador_ativo` | boolean | — | — | descartado |
+| — | — | — | — | `Leituras.fonte` = `FONTE_DADOS` (URL da API) |
 
-- Textos devem ser removidos de espaços nas extremidades.
-- Campos numéricos devem aceitar apenas representações decimais válidas.
-- Medições ausentes (sem a chave, `null` ou string vazia) são gravadas como `NULL`, sem estimativa.
-- Booleanos não devem ser convertidos por coerção genérica: valores diferentes de `true` e `false` devem ser rejeitados.
-- A data deve ser convertida para um tipo de data/hora e receber uma convenção de fuso definida pela aplicação.
-- A combinação `estacao_codigo` e `data_hora` deve ser única para impedir duplicidade de leituras.
+\* `municipio` nulo é aceito quando `cidade_nome` está preenchido.
+
+## Medições (11 parâmetros no payload atual)
+
+Para cada parâmetro `X`: `X` → `Leitura_Itens.valor`; `X_tipo_codigo` → `Parametros.codigo_parametro`; `X_unidade_medida` → `Parametros.unidade_medida`. `X_codigo` e `data_hora_leitura_X` são descartados. As faixas vêm do `sql/dml_populacao.sql` (decisão D6, proposta aguardando validação do time).
+
+| Campo `X` | Código (`X_tipo_codigo`) | Nome em `Parametros` | Unidade | Faixa válida |
+|---|---|---|---|---|
+| `temperatura_agua` | `TIP-TAG` | Temperatura da água | °C | 0 a 45 |
+| `ph` | `TIP-PH` | pH | pH | 0 a 14 |
+| `temperatura` | `TIP-TMP` | Temperatura do ar | °C | -40 a 60 |
+| `umidade` | `TIP-UMI` | Umidade relativa do ar | % | 0 a 100 |
+| `pressao` | `TIP-PRE` | Pressão atmosférica ao nível do mar | hPa | 870 a 1085 |
+| `precipitacao` | `TIP-CHU` | Precipitação | mm | ≥ 0 |
+| `velocidade_vento` | `TIP-VEN` | Velocidade do vento | km/h | 0 a 200 |
+| `radiacao_solar` | `TIP-RAD` | Radiação solar | W/m² | 0 a 1500 |
+| `oxigenio_dissolvido` | `TIP-OXI` | Oxigênio dissolvido | mg/L | 0 a 20 |
+| `condutividade` | `TIP-CON` | Condutividade elétrica a 25 °C | µS/cm | ≥ 0 |
+| `turbidez` | `TIP-TUR` | Turbidez | NTU | ≥ 0 |
+
+Nomes de unidade fora do padrão no payload: `oxigenio_dissolvido_medida` e `velocidade_unidade_medida` (para `velocidade_vento`).
+
+## Perfil do dataset atual (9.888 registros)
+
+| Situação | Quantidade | Tratamento |
+|---|---|---|
+| Sem estação nem operador | 50 | leitura rejeitada |
+| Com estação e sem operador | 32 | leitura rejeitada |
+| Medições nulas nos registros válidos | 2.681 | só o item descartado |
+| Medições fora da faixa nos registros válidos | 603 | só o item descartado |
+| Registros gravados | 9.806 leituras, 104.582 itens | — |

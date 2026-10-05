@@ -1,34 +1,18 @@
 from datetime import date
 
 from src.database.connection import DatabaseConnection
+from src.models.leitura_item_model import LeituraItemModel
 from src.models.leitura_model import LeituraModel
+from src.models.parametro_model import ParametroModel
 
 
 class LeituraRepository:
     def __init__(self, database: DatabaseConnection | None = None) -> None:
         self.__database = database or DatabaseConnection()
 
-    def get_by_id(self, operadorID: int) -> dict:
-        query = "SELECT * FROM operadores WHERE id = ?"
-        result = self.__database.execute(query, (operadorID,))
-
-        if not result:
-            return None
-
-        return {"id": result[0], "nome": result[1], "estado": result[2]}
-
-    def get_by_name(self, nome: str) -> dict | None:
-        query = "SELECT * FROM operadores WHERE nome = ?"
-        result = self.__database.fetch_one(
-            query,
-            (nome,),
-        )
-
-        if not result:
-            return None
-
-        return {"id": result[0], "nome": result[1], "estado": result[2]}
-
+    # Consultas legadas da Parte 1 (modelo antigo, uma coluna por medição).
+    # Só a análise (src/services/analytics_service.py) as usa; serão adaptadas
+    # ao modelo Leituras + Leitura_Itens + Parametros na fase de analytics.
     def get_leituras_meteorologicas_by_cidade(
         self,
         cidade_id: int,
@@ -223,81 +207,139 @@ class LeituraRepository:
             for linha in result
         ]
 
-    def create(self, nome: str, estado: str):
-        query = f"INSERT INTO cidades (codigo, nome, tipo, cidade_id) VALUES ('{nome}', '{estado}')"
-        return self.__database.execute(query)
-
-    def create_many(self, leituras: list[LeituraModel]):
-        query = """
-            INSERT INTO Leituras (
-                estacao_id,
-                data_hora,
-                temperatura,
-                umidade,
-                pressao,
-                precipitacao,
-                velocidade_vento,
-                direcao_vento,
-                radiacao_solar,
-                temperatura_agua,
-                ph,
-                oxigenio_dissolvido,
-                condutividade,
-                turbidez,
-                fonte
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    def substituir_leituras(
+        self,
+        leituras: list[LeituraModel],
+        itens: list[LeituraItemModel],
+    ) -> dict[str, int]:
         """
-        params = [
-            (
-                leitura.estacao_id,
-                leitura.data_hora,
-                leitura.temperatura,
-                leitura.umidade,
-                leitura.pressao,
-                leitura.precipitacao,
-                leitura.velocidade_vento,
-                leitura.direcao_vento,
-                leitura.radiacao_solar,
-                leitura.temperatura_agua,
-                leitura.ph,
-                leitura.oxigenio_dissolvido,
-                leitura.condutividade,
-                leitura.turbidez,
-                leitura.fonte,
-            )
-            for leitura in leituras
-        ]
+        Grava as leituras e os itens substituindo as partições afetadas.
 
-        return self.__database.execute_many(query, params)
+        Partição = estação + dia da leitura. Toda leitura já gravada numa
+        partição do lote, ou com o mesmo codigo_registro, é apagada (itens
+        primeiro) e o lote é inserido de novo. Assim, reexecutar o mesmo
+        período (backfill) não duplica nada e reflete exatamente o lote atual.
 
-    def insert_leituras(self, leituras: list[LeituraModel]):
-        """Método-ponte para a operação de inserção de leituras."""
-        return self.create_many(leituras)
-
-    def save_readings(self, registros_ok: list[dict]) -> dict[str, int]:
+        Usa tabelas temporárias da sessão (#lote, #itens): deve rodar dentro de
+        DatabaseConnection.transaction(), que mantém uma única conexão.
         """
-        Coordena a persistência das entidades na ordem de dependência.
+        if not leituras:
+            return {"leituras_removidas": 0, "leituras_gravadas": 0, "itens_gravados": 0}
+
+        db = self.__database
+        db.execute("""
+            DROP TABLE IF EXISTS #lote;
+            DROP TABLE IF EXISTS #itens;
+            DROP TABLE IF EXISTS #remover;
+            CREATE TABLE #lote (
+                codigo_registro VARCHAR(50) NOT NULL PRIMARY KEY,
+                operador_id INT NOT NULL,
+                estacao_id INT NOT NULL,
+                data_hora DATETIME2 NOT NULL,
+                fonte VARCHAR(100) NOT NULL
+            );
+            CREATE TABLE #itens (
+                codigo_registro VARCHAR(50) NOT NULL,
+                parametro_id INT NOT NULL,
+                valor FLOAT NOT NULL,
+                PRIMARY KEY (codigo_registro, parametro_id)
+            );
+        """)
+
+        db.insert_em_lotes(
+            "#lote",
+            ("codigo_registro", "operador_id", "estacao_id", "data_hora", "fonte"),
+            [
+                (l.codigo_registro, l.operador_id, l.estacao_id, l.data_hora, l.fonte)
+                for l in leituras
+            ],
+        )
+        db.insert_em_lotes(
+            "#itens",
+            ("codigo_registro", "parametro_id", "valor"),
+            [(i.codigo_registro, i.parametro_id, i.valor) for i in itens],
+        )
+
+        db.execute("""
+            SELECT L.id_leitura
+            INTO #remover
+            FROM dbo.Leituras AS L
+            WHERE EXISTS (
+                    SELECT 1 FROM #lote AS T
+                    WHERE T.estacao_id = L.estacao_id
+                      AND CAST(T.data_hora AS DATE) = CAST(L.data_hora AS DATE))
+               OR EXISTS (
+                    SELECT 1 FROM #lote AS T
+                    WHERE T.codigo_registro = L.codigo_registro);
+        """)
+        db.execute("""
+            DELETE I FROM dbo.Leitura_Itens AS I
+            INNER JOIN #remover AS R ON R.id_leitura = I.leitura_id;
+        """)
+        removidas = db.execute("""
+            DELETE L FROM dbo.Leituras AS L
+            INNER JOIN #remover AS R ON R.id_leitura = L.id_leitura;
+        """)
+
+        gravadas = db.execute("""
+            INSERT INTO dbo.Leituras (codigo_registro, operador_id, estacao_id, data_hora, fonte)
+            SELECT codigo_registro, operador_id, estacao_id, data_hora, fonte
+            FROM #lote;
+        """)
+        itens_gravados = db.execute("""
+            INSERT INTO dbo.Leitura_Itens (leitura_id, parametro_id, valor)
+            SELECT L.id_leitura, I.parametro_id, I.valor
+            FROM #itens AS I
+            INNER JOIN dbo.Leituras AS L ON L.codigo_registro = I.codigo_registro;
+        """)
+
+        db.execute("DROP TABLE #lote; DROP TABLE #itens; DROP TABLE #remover;")
+        return {
+            "leituras_removidas": removidas,
+            "leituras_gravadas": gravadas,
+            "itens_gravados": itens_gravados,
+        }
+
+    def insert_leituras(self, leituras: list[LeituraModel], itens: list[LeituraItemModel]):
+        """Método-ponte para a operação de gravação de leituras e itens."""
+        return self.substituir_leituras(leituras, itens)
+
+    def save_readings(
+        self,
+        registros_ok: list[dict],
+        parametros: dict[str, ParametroModel],
+        fonte: str,
+    ) -> dict[str, int]:
+        """
+        Coordena a persistência das entidades na ordem de dependência:
+        Estados (leitura) → Municípios → Operadores → Estações → Leituras + itens.
+
+        registros_ok: só os registros válidos (ValidationService.registros_validos).
+        parametros: retorno de ParametroService.sincronizar() (código → id).
 
         Todas as etapas usam a mesma transação: se qualquer uma falhar, nada
         do lote permanece gravado.
         """
         from src.ingestion.importar_dados import (
-            importar_cidades,
             importar_estacoes,
             importar_leituras,
+            importar_municipios,
             importar_operadores,
-            __dict__ as ingestion_state,
         )
-
-        for cache_name in ("__cidades", "__operadores", "__estacoes"):
-            cache = ingestion_state.get(cache_name)
-            if isinstance(cache, dict):
-                cache.clear()
+        from src.repository.estado_repository import EstadoRepository
 
         with self.__database.transaction() as database:
-            importar_cidades(registros_ok, database)
-            importar_operadores(registros_ok, database)
-            importar_estacoes(registros_ok, database)
-            importar_leituras(registros_ok, database)
+            estados = {e.sigla: e.id_estado for e in EstadoRepository(database).get_all()}
+            municipios = importar_municipios(registros_ok, estados, database)
+            operadores = importar_operadores(registros_ok, municipios, database)
+            estacoes = importar_estacoes(registros_ok, municipios, database)
+            contagens = importar_leituras(
+                registros_ok, operadores, estacoes, parametros, fonte, database
+            )
 
-        return {"registros": len(registros_ok)}
+        return {
+            "municipios": len(set(municipios.values())),
+            "operadores": len(operadores),
+            "estacoes": len(estacoes),
+            **contagens,
+        }

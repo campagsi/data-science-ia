@@ -1,163 +1,191 @@
 # Modelo de Dados
 
-## Requisito original e decisão de tecnologia
+Referência do banco relacional operacional da Parte 2. O schema é mantido **somente** por scripts SQL:
 
-O enunciado original pede banco relacional SQLite ou PostgreSQL e, no mínimo, as estruturas de estações e leituras. O projeto ampliou o modelo para cidades, operadores, estações e leituras, mas adotou Azure SQL. Registre Azure SQL como desvio a confirmar com a avaliação; este documento não altera as opções originais. O novo modelo 3FN da Parte 2 e o que muda em relação a este documento estão em [analise-implementacao.md](analise-implementacao.md).
+- [sql/ddl_banco_relacional.sql](../sql/ddl_banco_relacional.sql): estado completo e atual (tabelas, chaves e índices);
+- [sql/migrations/](../sql/migrations/): alterações incrementais para bancos que já têm dados;
+- [sql/dml_populacao.sql](../sql/dml_populacao.sql): carga inicial de domínio (estados e parâmetros).
 
-## Visão Geral
-O modelo foi estruturado de forma relacional para representar a relação entre cidades, operadores, estações de monitoramento e as leituras coletadas ao longo do tempo. A estrutura permite que cada cidade tenha várias estações, que cada operador seja responsável por diversas estações e que cada estação registre múltiplas medições em diferentes datas e horários.
+Como executar e como criar uma migration: seção 4 de [manual-execucao.md](manual-execucao.md).
 
-A estrutura é composta por quatro entidades principais:
+## Requisito e decisão de tecnologia
 
-* `Cidades`
-* `Operadores`
-* `Estacoes`
-* `Leituras`
+O projeto final ([projeto_final.pdf](projeto_final.pdf), item 3.3) pede um banco operacional **estritamente na 3ª Forma Normal**, com `Estacoes`, `Operadores` (anonimizados), `Parametros` (domínio), `Leituras` (cabeçalho) e `Leitura_Itens` (N:M com chave primária composta). O modelo adotado segue essa estrutura e acrescenta `Estados` e `Municipios` para normalizar a localização. O banco usado é o Azure SQL; o enunciado da Parte 1 citava SQLite ou PostgreSQL.
 
-## Diagrama de Entidades
+## Visão geral
+
+Cada **leitura** é um evento: uma estação, num instante, com um operador responsável. As **medições** da leitura ficam em `Leitura_Itens`, uma linha por **parâmetro** medido. Um parâmetro novo no payload vira uma linha em `Parametros`, sem `ALTER TABLE`.
+
 ```mermaid
 classDiagram
+    direction LR
 
-    Cidades "1" --> "0..*" Estacoes : possui
-    Operadores "1" --> "0..*" Estacoes : administra
-    Estacoes "1" --> "0..*" Leituras : gera
+    Estados "1" --> "0..*" Municipios : contém
+    Municipios "1" --> "0..*" Estacoes : localiza
+    Municipios "1" --> "0..*" Operadores : lota
+    Estacoes "1" --> "0..*" Leituras : registra
+    Operadores "1" --> "0..*" Leituras : responde por
+    Leituras "1" --> "1..*" Leitura_Itens : detalha
+    Parametros "1" --> "0..*" Leitura_Itens : mede
 
-    class Cidades {
-        +int id
-        +String nome
-        +String estado
+    class Estados {
+        +int id_estado PK
+        +char(2) sigla UQ
+        +varchar(100) nome UQ
     }
-
-    class Operadores {
-        +int id
-        +String codigo
-        +String nome
-        +String tipo
-        +boolean ativo
+    class Municipios {
+        +int id_municipio PK
+        +varchar(150) nome
+        +int estado_id FK
     }
-
     class Estacoes {
-        +int id
-        +String codigo
-        +String nome
-        +int cidade_id
-        +int operador_id
-        +decimal latitude
-        +decimal longitude
-        +boolean ativa
-        +String tipo
+        +int id_estacao PK
+        +varchar(50) codigo_estacao UQ
+        +varchar(150) nome
+        +int municipio_id FK
+        +decimal(10,7) latitude
+        +decimal(10,7) longitude
     }
-
+    class Operadores {
+        +int id_operador PK
+        +varchar(50) codigo_operador UQ
+        +varchar(64) nome_hash
+        +varchar(64) cpf_hash UQ
+        +int municipio_id FK
+        +varchar(255) email_criptografado
+    }
+    class Parametros {
+        +int id_parametro PK
+        +varchar(50) codigo_parametro UQ
+        +varchar(100) nome UQ
+        +varchar(30) unidade_medida
+        +float valor_minimo
+        +float valor_maximo
+    }
     class Leituras {
-        +int id
-        +int estacao_id
-        +DateTime data_hora
-        +decimal temperatura
-        +decimal umidade
-        +decimal pressao
-        +decimal precipitacao
-        +decimal velocidade_vento
-        +decimal direcao_vento
-        +decimal radiacao_solar
-        +decimal temperatura_agua
-        +decimal ph
-        +decimal oxigenio_dissolvido
-        +decimal condutividade
-        +decimal turbidez
-        +String fonte
+        +int id_leitura PK
+        +int operador_id FK
+        +int estacao_id FK
+        +datetime2 data_hora
+        +varchar(100) fonte
+        +datetime2 data_ingestao
+        +varchar(50) codigo_registro UQ
     }
-
-    note for Cidades "PK: id"
-    note for Operadores "PK: id"
-    note for Estacoes "PK: id | FK: cidade_id | FK: operador_id | UNIQUE: codigo"
-    note for Leituras "PK: id | FK: estacao_id"
+    class Leitura_Itens {
+        +int leitura_id PK,FK
+        +int parametro_id PK,FK
+        +float valor
+    }
 ```
 
-## Estrutura das Tabelas
+## Estrutura das tabelas
 
-### `Cidades`
-Armazena as informações básicas das cidades onde as estações estão localizadas.
+Todas as colunas são `NOT NULL`, exceto as indicadas.
 
-- `id`: identificador único da cidade
-- `nome`: nome da cidade
-- `estado`: unidade federativa
+### `Estados`
 
-### `Operadores`
-Representa os responsáveis ou entidades que operam as estações de monitoramento.
+Unidades federativas. Carregadas pelo `dml_populacao.sql` (27 UFs), porque o payload só traz a sigla e `nome` é obrigatório.
 
-- `id`: identificador único do operador
-- `codigo`: código de identificação do operador
-- `nome`: nome do operador
-- `tipo`: tipo de operador
-- `ativo`: indica se o operador está ativo
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id_estado` | `INT IDENTITY` | PK |
+| `sigla` | `CHAR(2)` | `UNIQUE` |
+| `nome` | `VARCHAR(100)` | `UNIQUE` |
+
+### `Municipios`
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id_municipio` | `INT IDENTITY` | PK |
+| `nome` | `VARCHAR(150)` | `UNIQUE (nome, estado_id)` |
+| `estado_id` | `INT` | FK → `Estados` |
 
 ### `Estacoes`
-Contém os dados cadastrais e geográficos da estação.
 
-- `id`: identificador único da estação
-- `codigo`: código interno da estação, recebido em `estacao_codigo`
-- `nome`: nome da estação
-- `cidade_id`: chave estrangeira para a cidade
-- `operador_id`: chave estrangeira para o operador
-- `latitude`: latitude geográfica
-- `longitude`: longitude geográfica
-- `ativa`: indica se a estação está ativa
-- `tipo`: tipo da estação
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id_estacao` | `INT IDENTITY` | PK |
+| `codigo_estacao` | `VARCHAR(50)` | `UNIQUE`; vem de `estacao_codigo` |
+| `nome` | `VARCHAR(150)` | |
+| `municipio_id` | `INT` | FK → `Municipios` |
+| `latitude` | `DECIMAL(10,7)` | `CHECK` entre -90 e 90 |
+| `longitude` | `DECIMAL(10,7)` | `CHECK` entre -180 e 180 |
 
-### `Leituras`
-Armazena os registros de monitoramento coletados em cada estação ao longo do tempo.
+### `Operadores`
 
-- `id`: identificador único da leitura
-- `estacao_id`: chave estrangeira para a estação
-- `data_hora`: data e hora da medição
-- `temperatura`: temperatura do ambiente
-- `umidade`: umidade relativa do ar
-- `pressao`: pressão atmosférica
-- `precipitacao`: volume de precipitação
-- `velocidade_vento`: velocidade do vento
-- `direcao_vento`: direção do vento em graus
-- `radiacao_solar`: radiação solar
-- `temperatura_agua`: temperatura da água
-- `ph`: potencial hidrogeniônico da água
-- `oxigenio_dissolvido`: nível de oxigênio dissolvido
-- `condutividade`: condutividade elétrica
-- `turbidez`: nível de turbidez
-- `fonte`: origem do registro, como `SIMULADO` ou uma API externa
+Somente dados já protegidos por `src/security.py` ([seguranca-lgpd.md](seguranca-lgpd.md)).
 
-## Considerações
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id_operador` | `INT IDENTITY` | PK |
+| `codigo_operador` | `VARCHAR(50)` | `UNIQUE`; vem de `operador_codigo` |
+| `nome_hash` | `VARCHAR(64)` | SHA-256 (ou HMAC-SHA256 com pepper) do nome |
+| `cpf_hash` | `VARCHAR(64)` | `UNIQUE`; SHA-256 (ou HMAC) do CPF só com dígitos |
+| `municipio_id` | `INT` | FK → `Municipios` |
+| `email_criptografado` | `VARCHAR(255) NULL` | token Fernet, reversível com a `CHAVE_CRIPTOGRAFIA` (migration V002) |
 
-O modelo foi organizado para separar claramente:
+### `Parametros`
 
-* dados geográficos e cadastrais das cidades;
-* informações dos operadores;
-* dados estruturais das estações;
-* registros históricos das medições.
+Domínio dos parâmetros medidos. Os 11 do payload atual vêm do `dml_populacao.sql`; um parâmetro novo é cadastrado automaticamente pela ingestão, sem faixa.
 
-Essa organização evita redundância de informações e facilita consultas por cidade, operador, estação e período de coleta. A tabela de leituras funciona como o principal conjunto de dados analíticos, permitindo filtros, agregações e análises ambientais ao longo do tempo.
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id_parametro` | `INT IDENTITY` | PK |
+| `codigo_parametro` | `VARCHAR(50)` | `UNIQUE`; valor de `<param>_tipo_codigo` no payload (ex.: `TIP-PH`) |
+| `nome` | `VARCHAR(100)` | `UNIQUE`; nome legível |
+| `unidade_medida` | `VARCHAR(30)` | |
+| `valor_minimo` | `FLOAT NULL` | faixa de validade física; `NULL` = sem limite |
+| `valor_maximo` | `FLOAT NULL` | idem |
+
+### `Leituras` (cabeçalho)
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id_leitura` | `INT IDENTITY` | PK |
+| `operador_id` | `INT` | FK → `Operadores` |
+| `estacao_id` | `INT` | FK → `Estacoes` |
+| `data_hora` | `DATETIME2` | `data_hora_ciclo` do payload |
+| `fonte` | `VARCHAR(100)` | valor de `FONTE_DADOS` (URL da API) |
+| `data_ingestao` | `DATETIME2` | `DEFAULT GETDATE()` |
+| `codigo_registro` | `VARCHAR(50)` | `UNIQUE`; `registro_codigo` do payload, chave natural (migration V001) |
+
+### `Leitura_Itens` (detalhe, N:M)
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `leitura_id` | `INT` | PK composta, FK → `Leituras` |
+| `parametro_id` | `INT` | PK composta, FK → `Parametros` |
+| `valor` | `FLOAT` | medição nula ou fora da faixa não vira item |
+
+### Índices
+
+`IX_Municipios_Estado`, `IX_Estacoes_Municipio`, `IX_Operadores_Municipio`, `IX_Leituras_DataHora`, `IX_Leituras_Estacao`, `IX_Leituras_Operador`, `IX_LeituraItens_Parametro` e `IX_Leituras_Estacao_DataHora`. Este último foi criado pela V001 e é usado pela substituição de partição.
 
 ## Integridade e idempotência
 
-- `Operadores.codigo` deve ser único.
-- `Estacoes.codigo` deve ser único.
-- `Leituras` deve possuir uma restrição única para `estacao_id` e `data_hora`.
-- Os campos `latitude`, `longitude`, `ativa` e os valores ambientais devem ser persistidos após a normalização do JSON, nunca diretamente como texto bruto.
+A reexecução da ingestão para o mesmo período (backfill) **não duplica nada** ([projeto_final.pdf](projeto_final.pdf), item 3.7):
 
-As restrições de unicidade e a idempotência listadas acima são decisões de robustez posteriores ao mínimo exigido no enunciado. Como ainda não existem no schema, o reprocessamento pode duplicar dados.
+| Tabela | Como é gravada | Chave |
+|---|---|---|
+| `Estados` | só leitura (vem do DML) | `sigla` |
+| `Municipios` | `MERGE`, insere se não existir | `(nome, estado_id)` |
+| `Operadores` | `MERGE`, insere ou atualiza | `codigo_operador` |
+| `Estacoes` | `MERGE`, insere ou atualiza nome, município e coordenadas | `codigo_estacao` |
+| `Parametros` | `INSERT ... WHERE NOT EXISTS` | `codigo_parametro` |
+| `Leituras` + `Leitura_Itens` | **substituição de partição**: apaga as leituras da mesma estação e dia (e as de mesmo `codigo_registro`), itens primeiro, e insere o lote | partição = estação + dia; `codigo_registro` |
+
+- Tudo roda numa **única transação** (`LeituraRepository.save_readings` → `DatabaseConnection.transaction()`): se uma etapa falhar, nada do lote fica gravado.
+- O lote vai para tabelas temporárias da sessão (`#lote`, `#itens`) e é gravado com operações de conjunto, sem uma ida ao banco por linha.
+- Uma partição em que todos os registros do lote são inválidos não é tocada.
+- Validado no banco `impacta` com o dataset completo carregado duas vezes: as contagens ficaram idênticas e não houve nenhuma duplicidade (relatório da fase 8 em [analise-implementacao.md](analise-implementacao.md)).
 
 ## Situação atual do schema
 
-> **Parte 2:** o schema descrito nesta seção é o modelo antigo da Parte 1, criado pelo `src/database/criar_tabelas.py`, que foi removido. O banco atual segue o modelo 3FN de [sql/ddl_banco_relacional.sql](../sql/ddl_banco_relacional.sql), evoluído por `sql/migrations/` (ver [analise-implementacao.md](analise-implementacao.md) e a seção 4 de [manual-execucao.md](manual-execucao.md)). Esta seção será reescrita na fase 11 do TODO.
-
-O schema antigo ainda não implementava todo o modelo acima:
-
-- `Operadores` não possui a coluna `ativo`; o campo `operador_ativo` é validado, mas não é persistido;
-- `Operadores` possui `cidade_id` (chave estrangeira para `Cidades`), que não aparece no diagrama;
-- não há restrições `UNIQUE` em `Operadores.codigo`, `Estacoes.codigo` nem em `Leituras (estacao_id, data_hora)`; reprocessar um lote duplica os registros;
-- as colunas de cadastro e medição aceitam `NULL`, exceto `estacao_id`, `data_hora`, `fonte` e as chaves estrangeiras;
-- os textos usam `VARCHAR`, os valores numéricos `FLOAT` e `data_hora` usa `DATETIME`.
-
-A persistência de um lote ocorre em uma única transação (`DatabaseConnection.transaction()`): se qualquer inserção falhar, nada do lote é gravado.
+- O banco `impacta` está igual ao DDL, com as migrations `V001` (`codigo_registro`) e `V002` (`email_criptografado`) aplicadas.
+- O DML de domínio foi aplicado: 27 estados e 11 parâmetros.
+- Até a primeira carga real (fase 9 do [TODO](todo-idempotencia.md)), `Municipios`, `Operadores`, `Estacoes`, `Leituras` e `Leitura_Itens` estão vazias.
+- O banco ainda tem a tabela `dbo.sysdiagrams`, criada pelo SSMS, que não interfere.
 
 ## Consultas SQL do trabalho
 
-O repositório implementa `JOIN` entre leituras e estações e filtros por data/período. As estatísticas atuais são calculadas em pandas, não com `GROUP BY` SQL. O script [impacta.sql](../impacta.sql) demonstra junção e filtro temporal, mas não a agregação SQL por estação; esse item ainda está parcial.
+O enunciado pede consultas com `JOIN`, agregação por estação e filtro por período. O arquivo [sql/queries_analiticas.sql](../sql/queries_analiticas.sql) ainda está vazio. As consultas da análise estatística ainda leem o modelo antigo e serão reescritas sobre `Leituras` + `Leitura_Itens` + `Parametros` na fase de analytics. As consultas de conferência pós-carga (duplicidade, órfãos e faixas) estão na fase 9 do TODO.

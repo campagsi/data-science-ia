@@ -94,19 +94,31 @@ def test_transacao_nao_pode_ser_aninhada(monkeypatch):
                 pass
 
 
-def test_insert_estacao_delega_para_create_many(monkeypatch):
-    monkeypatch.setattr(EstacaoRepository, "create_many", lambda self, estacoes: ("create_many", estacoes))
+def test_insert_estacao_delega_para_merge_many(monkeypatch):
+    monkeypatch.setattr(EstacaoRepository, "merge_many", lambda self, estacoes: ("merge_many", estacoes))
 
-    assert EstacaoRepository(object()).insert_estacao(["e1"]) == ("create_many", ["e1"])
-
-
-def test_insert_leituras_delega_para_create_many(monkeypatch):
-    monkeypatch.setattr(LeituraRepository, "create_many", lambda self, leituras: ("create_many", leituras))
-
-    assert LeituraRepository(object()).insert_leituras(["l1"]) == ("create_many", ["l1"])
+    assert EstacaoRepository(object()).insert_estacao(["e1"]) == ("merge_many", ["e1"])
 
 
-def test_save_readings_persiste_na_ordem_dentro_da_transacao(monkeypatch):
+def test_insert_leituras_delega_para_substituir_leituras(monkeypatch):
+    monkeypatch.setattr(
+        LeituraRepository, "substituir_leituras", lambda self, leituras, itens: ("substituir", leituras, itens)
+    )
+
+    assert LeituraRepository(object()).insert_leituras(["l1"], ["i1"]) == ("substituir", ["l1"], ["i1"])
+
+
+@pytest.fixture
+def estados_falsos(monkeypatch):
+    from src.models import EstadoModel
+    from src.repository.estado_repository import EstadoRepository
+
+    monkeypatch.setattr(
+        EstadoRepository, "get_all", lambda self: [EstadoModel(id_estado=19, sigla="RJ", nome="Rio de Janeiro")]
+    )
+
+
+def test_save_readings_persiste_na_ordem_dentro_da_transacao(monkeypatch, estados_falsos):
     eventos = []
 
     class DatabaseFalso:
@@ -117,27 +129,43 @@ def test_save_readings_persiste_na_ordem_dentro_da_transacao(monkeypatch):
             eventos.append("commit")
 
     database = DatabaseFalso()
-    for nome in ("importar_cidades", "importar_operadores", "importar_estacoes", "importar_leituras"):
-        monkeypatch.setattr(
-            importar_dados,
-            nome,
-            lambda dados, db, nome=nome: eventos.append((nome, len(dados), db is database)),
-        )
+    monkeypatch.setattr(
+        importar_dados, "importar_municipios",
+        lambda dados, estados, db: eventos.append(("municipios", estados, db is database))
+        or {("Rio de Janeiro", "RJ"): 7},
+    )
+    monkeypatch.setattr(
+        importar_dados, "importar_operadores",
+        lambda dados, municipios, db: eventos.append(("operadores", municipios)) or {"OP-1": 3},
+    )
+    monkeypatch.setattr(
+        importar_dados, "importar_estacoes",
+        lambda dados, municipios, db: eventos.append(("estacoes", municipios)) or {"EST-1": 5},
+    )
+    monkeypatch.setattr(
+        importar_dados, "importar_leituras",
+        lambda dados, operadores, estacoes, parametros, fonte, db: eventos.append(
+            ("leituras", operadores, estacoes, parametros, fonte)
+        ) or {"leituras_removidas": 0, "leituras_gravadas": 2, "itens_gravados": 20},
+    )
 
-    resultado = LeituraRepository(database).save_readings([{}, {}])
+    resultado = LeituraRepository(database).save_readings([{}, {}], {"TIP-PH": "ph"}, "http://api-de-teste")
 
-    assert resultado == {"registros": 2}
+    assert resultado == {
+        "municipios": 1, "operadores": 1, "estacoes": 1,
+        "leituras_removidas": 0, "leituras_gravadas": 2, "itens_gravados": 20,
+    }
     assert eventos == [
         "inicio",
-        ("importar_cidades", 2, True),
-        ("importar_operadores", 2, True),
-        ("importar_estacoes", 2, True),
-        ("importar_leituras", 2, True),
+        ("municipios", {"RJ": 19}, True),
+        ("operadores", {("Rio de Janeiro", "RJ"): 7}),
+        ("estacoes", {("Rio de Janeiro", "RJ"): 7}),
+        ("leituras", {"OP-1": 3}, {"EST-1": 5}, {"TIP-PH": "ph"}, "http://api-de-teste"),
         "commit",
     ]
 
 
-def test_save_readings_interrompe_o_lote_na_primeira_falha(monkeypatch):
+def test_save_readings_interrompe_o_lote_na_primeira_falha(monkeypatch, estados_falsos):
     chamadas = []
 
     class DatabaseFalso:
@@ -145,15 +173,15 @@ def test_save_readings_interrompe_o_lote_na_primeira_falha(monkeypatch):
         def transaction(self):
             yield self
 
-    def falhar(dados, db):
+    def falhar(*args):
         raise RuntimeError("Falha ao importar Operadores")
 
-    monkeypatch.setattr(importar_dados, "importar_cidades", lambda d, db: chamadas.append("cidades"))
+    monkeypatch.setattr(importar_dados, "importar_municipios", lambda *a: chamadas.append("municipios") or {})
     monkeypatch.setattr(importar_dados, "importar_operadores", falhar)
-    monkeypatch.setattr(importar_dados, "importar_estacoes", lambda d, db: chamadas.append("estacoes"))
-    monkeypatch.setattr(importar_dados, "importar_leituras", lambda d, db: chamadas.append("leituras"))
+    monkeypatch.setattr(importar_dados, "importar_estacoes", lambda *a: chamadas.append("estacoes") or {})
+    monkeypatch.setattr(importar_dados, "importar_leituras", lambda *a: chamadas.append("leituras") or {})
 
     with pytest.raises(RuntimeError, match="Operadores"):
-        LeituraRepository(DatabaseFalso()).save_readings([{}])
+        LeituraRepository(DatabaseFalso()).save_readings([{}], {}, "http://api-de-teste")
 
-    assert chamadas == ["cidades"]
+    assert chamadas == ["municipios"]

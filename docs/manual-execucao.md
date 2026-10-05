@@ -48,19 +48,17 @@ Crie `Data-Science-Ia/.env` com base no `.env.example` e informe a string do Azu
 
 ```env
 AZURE_SQL_CONNECTIONSTRING="Server=tcp:seu-servidor.database.windows.net,1433;Database=seu_banco;UID=seu_usuario;PWD=sua_senha;Encrypt=yes;TrustServerCertificate=no"
-MOCK_API="http://127.0.0.1:8000"
+FONTE_DADOS="http://127.0.0.1:8000"
 CHAVE_CRIPTOGRAFIA="chave Fernet compartilhada pelo time"
 PEPPER_HASH="segredo compartilhado pelo time (opcional)"
-FONTE_DADOS="API_MOCK"
 ```
 
 | Variável | Obrigatória | Uso |
 |---|---|---|
 | `AZURE_SQL_CONNECTIONSTRING` | sim | Conexão com o banco |
-| `MOCK_API` | sim | URL da API de ingestão |
+| `FONTE_DADOS` | sim | URL da API de ingestão; também é gravada em `Leituras.fonte` (máximo de 100 caracteres). Substitui a antiga `MOCK_API`. |
 | `CHAVE_CRIPTOGRAFIA` | sim | Criptografia reversível do e-mail do operador. A aplicação não inicia sem ela. |
 | `PEPPER_HASH` | não | Segredo do hash de CPF e nome; vazio = SHA-256 puro |
-| `FONTE_DADOS` | não | Valor gravado em `Leituras.fonte`; padrão `API_MOCK` |
 
 A `CHAVE_CRIPTOGRAFIA` é gerada uma única vez e compartilhada com o time fora do Git:
 
@@ -98,7 +96,8 @@ sqlcmd -S <servidor>.database.windows.net -d <banco> -U <usuario> -P <senha> -f 
 **Não execute o DDL.** Aplique apenas as migrations que ainda não foram aplicadas, em ordem de número:
 
 ```bash
-sqlcmd -S <servidor>.database.windows.net -d <banco> -U <usuario> -P <senha> -f 65001 -i sql/migrations/V001__descricao.sql
+sqlcmd -S <servidor>.database.windows.net -d <banco> -U <usuario> -P <senha> -f 65001 -i sql/migrations/V001__leituras_codigo_registro.sql
+sqlcmd -S <servidor>.database.windows.net -d <banco> -U <usuario> -P <senha> -f 65001 -i sql/migrations/V002__operadores_email_criptografado.sql
 ```
 
 O `-f 65001` faz o `sqlcmd` ler o arquivo em UTF-8; sem ele, acentos e símbolos como `°`, `µ` e `²` são gravados errados.
@@ -152,12 +151,31 @@ python main.py
 Ao iniciar, `iniciar_aplicacao()` executa, nesta ordem:
 
 1. `configurar_logs()`: cria `logs/pipeline_AAAAMMDD_HHMMSS.log` e `logs/rejeitados_AAAAMMDD_HHMMSS.log`;
-2. `load_config()`: exige `AZURE_SQL_CONNECTIONSTRING`, `MOCK_API` e `CHAVE_CRIPTOGRAFIA`;
+2. `load_config()`: exige `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` e `CHAVE_CRIPTOGRAFIA`;
 3. `configurar_seguranca()`: valida a chave Fernet e o pepper.
 
 Se qualquer passo falhar, a aplicação registra a causa com nível `CRITICAL` e termina com código `1`, sem mostrar senhas nem chaves. Depois, abre a interface de consulta no terminal (`src/cli`), que lê o banco.
 
-A execução do pipeline de ingestão (`run_pipeline()`) está desativada no `main.py` durante a migração para o novo banco e volta na fase 8 do [TODO](todo-idempotencia.md). O pipeline consulta exclusivamente a API configurada em `MOCK_API`.
+### Ingestão (carga no banco)
+
+Com a API da seção 5 em execução:
+
+```bash
+python main.py --ingestao
+```
+
+A ingestão:
+
+1. coleta, normaliza e anonimiza o lote;
+2. cadastra parâmetros novos;
+3. valida;
+4. grava no banco, numa única transação.
+
+O Data Lake (Bronze, Silver e Gold) é tratado em outra frente do projeto.
+
+A carga é **idempotente**: reexecutar o mesmo período substitui as leituras de cada estação + dia, sem duplicar. Ao final, o log registra uma linha `Resumo da ingestão` com recebidos, válidos, inválidos, itens descartados, leituras gravadas e substituídas e itens gravados.
+
+O pipeline consulta exclusivamente a API configurada em `FONTE_DADOS`. A interface de consulta e a análise estatística ainda leem o modelo antigo e serão adaptadas ao modelo 3FN na fase de analytics.
 
 ## 7. Verificar resultados
 
@@ -195,7 +213,7 @@ python -m pytest tests
 python -m pytest tests/unit/test_security.py tests/unit/test_logger.py
 ```
 
-Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (resultado esperado: `150 passed, 7 skipped`). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
+Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (resultado esperado: `152 passed, 7 skipped`). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
 
 ## Estrutura executada
 

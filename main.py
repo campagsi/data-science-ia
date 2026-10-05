@@ -1,3 +1,4 @@
+import sys
 from datetime import date
 from typing import Any
 
@@ -5,7 +6,7 @@ from src.cli.console_app import Console_APP
 from src.config import Settings, load_config
 from src.database.connection import DatabaseConnection
 from src.ingestion.data_client import DataClient
-from src.logger import configurar_logs, logger, registrar_resultados_validacao
+from src.logger import configurar_logs, logger, registrar_resultados_validacao, registrar_resumo
 from src.repository.estado_repository import EstadoRepository
 from src.repository.leitura_repository import LeituraRepository
 from src.repository.parametro_repository import ParametroRepository
@@ -17,8 +18,11 @@ from src.services.report_service import ReportService
 from src.services.validation_service import ValidationService
 
 
-def run_pipeline() -> dict[str, Any]:
-    """Coordena configuração, ingestão, persistência, análise e relatório."""
+def run_pipeline() -> dict[str, int]:
+    """
+    Executa a ingestão: coleta, normalização, cadastro de parâmetros, validação
+    e gravação idempotente no banco. Devolve o resumo da execução.
+    """
     settings = load_config()
     raw_data = DataClient(settings).fetch_data()
     normalized_data = NormalizationService().normalize(raw_data)
@@ -37,13 +41,35 @@ def run_pipeline() -> dict[str, Any]:
         siglas_estados=siglas,
         parametros_validos=set(parametros),
     ).validate_data(normalized_data)
-    registrar_resultados_validacao(resultados)
+    validacao = registrar_resultados_validacao(resultados)
     validated_data = ValidationService.registros_validos(resultados)
 
-    LeituraRepository(database).save_readings(validated_data)
+    gravacao = LeituraRepository(database).save_readings(
+        validated_data, parametros, settings.fonte_dados
+    )
 
-    service = AnaliticsService(database)
-    indicadores = service.calculate_metrics(
+    resumo = {
+        "recebidos": len(raw_data),
+        "rejeitados_na_normalizacao": len(raw_data) - len(normalized_data),
+        "registros_validos": validacao["registros_validos"],
+        "registros_invalidos": validacao["registros_invalidos"],
+        "itens_descartados": validacao["itens_invalidos"],
+        "leituras_gravadas": gravacao["leituras_gravadas"],
+        "leituras_substituidas": gravacao["leituras_removidas"],
+        "itens_gravados": gravacao["itens_gravados"],
+    }
+    registrar_resumo(**resumo)
+    return resumo
+
+
+def gerar_relatorio(database: DatabaseConnection) -> dict[str, Any]:
+    """
+    Análise estatística e relatório da Parte 1.
+
+    Ainda consulta o modelo antigo (Cidades e Leituras larga); será adaptada ao
+    modelo 3FN na fase de analytics e, até lá, não é chamada pela ingestão.
+    """
+    indicadores = AnaliticsService(database).calculate_metrics(
         cidade_id=1,
         data_inicio=date(2026, 6, 1),
         data_fim=date(2026, 12, 1),
@@ -70,9 +96,11 @@ def _exibir_resultados(resultados: dict[str, Any]) -> None:
 if __name__ == "__main__":
     try:
         iniciar_aplicacao()
-        # _exibir_resultados(run_pipeline())
-        console_app = Console_APP()
-        console_app.run()
+        if "--ingestao" in sys.argv[1:]:
+            run_pipeline()
+        else:
+            console_app = Console_APP()
+            console_app.run()
     except Exception as erro:
         logger.critical(f"{type(erro).__name__}: {erro}")
         raise SystemExit(1) from erro

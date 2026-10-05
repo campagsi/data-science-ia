@@ -50,15 +50,16 @@ GROUP BY i.object_id, i.name, i.is_unique;
 
 Detalhes e recomendações na seção 10 da análise.
 
-- [ ] **D1** Chave natural de `Leituras` (recomendado: `codigo_registro` + `UNIQUE`)
+- [x] **D1** Chave natural de `Leituras`: `codigo_registro` + `UNIQUE` (aprovada em 05/10/2026)
 - [ ] **D2** Leitura sem operador (recomendado: rejeitar e logar)
-- [ ] **D3** Valor de `Leituras.fonte` (recomendado: `FONTE_DADOS` no `.env`)
+- [x] **D3** `Leituras.fonte` = `FONTE_DADOS` (URL da API), variável única que substitui `MOCK_API` (05/10/2026)
 - [x] **D4** Mudança do `ValidationService` para rejeição por registro e por item (aprovada em 05/10/2026)
 - [ ] **D5** Campos do payload sem coluna no DDL (recomendado: descartar por ora)
 - [ ] **D6** Faixas mínima e máxima dos parâmetros (proposta na fase 3)
-- [ ] **D7** Coluna do e-mail criptografado (recomendado: trocar `email_hash` por `email_criptografado VARCHAR(255) NULL`)
-- [ ] **D8** Hash com pepper (recomendado: `PEPPER_HASH` no `.env`)
-- [ ] Se D1 = (a) e/ou D7 = (a): criar as migrations abaixo, atualizar o `ddl_banco_relacional.sql` para o estado final, aplicar as migrations no banco e repetir a Fase 0 (regras na seção 4 de [manual-execucao.md](manual-execucao.md))
+- [x] **D7** E-mail criptografado: `email_hash` trocado por `email_criptografado VARCHAR(255) NULL` (aprovada em 05/10/2026)
+- [x] **D8** Hash com pepper: configurável (`PEPPER_HASH` preenchido = HMAC-SHA256; vazio = SHA-256 puro), fase 2
+- [x] D1 = (a) e D7 = (a): migrations `V001` e `V002` criadas em `sql/migrations/`, DDL atualizado, aplicadas no banco `impacta` (duas vezes, para provar a idempotência) e Fase 0 repetida. Ações originais:
+- [x] Criar as migrations abaixo, atualizar o `ddl_banco_relacional.sql` para o estado final, aplicar as migrations no banco e repetir a Fase 0 (regras na seção 4 de [manual-execucao.md](manual-execucao.md))
 
 ```sql
 -- sql/migrations/V001__leituras_codigo_registro.sql  (D1 = a; somente se aprovado)
@@ -106,7 +107,7 @@ Desenho em [seguranca-lgpd.md](seguranca-lgpd.md) e na seção 6 da análise.
 - [x] `criptografar_email`, `descriptografar_email`: Fernet, `None` para vazio; erro de chave não expõe o token
 - [x] Chave em `CHAVE_CRIPTOGRAFIA` no `.env`, lida pelo `src/config.py` e entregue por `configurar_seguranca()` (nunca fixa no código, ao contrário do exemplo); a aplicação não inicia sem ela ou com chave inválida
 - [x] `cryptography` (e `rich`, usado pela CLI e que faltava) no `requirements.txt`
-- [x] `CHAVE_CRIPTOGRAFIA`, `PEPPER_HASH` e `FONTE_DADOS` no `.env.example` (só os nomes)
+- [x] `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH` no `.env.example` (só os nomes); `MOCK_API` renomeada para `FONTE_DADOS`
 - [ ] **Time:** gerar **uma** `CHAVE_CRIPTOGRAFIA` e **um** `PEPPER_HASH` e compartilhar com todos fora do Git (chaves diferentes geram hashes diferentes e e-mails ilegíveis entre máquinas)
 
 **Git**
@@ -206,7 +207,7 @@ Regras por nível:
   - `registro`: o registro normalizado só com os itens válidos
 - [x] Uma função de `src/logger.py` (`registrar_resultados_validacao`) grava o log de rejeitados **a partir dos resultados**: uma linha por registro inválido (com todos os `campos_nulos`, ex.: `campo=estacao_codigo,operador_codigo`) e uma por item inválido
 - [x] `ValidationService.registros_validos(resultados)` entrega só os registros com `valido=True`, usado pela `run_pipeline()` antes da persistência
-- [ ] Destino no Data Lake pelos resultados (Silver só com `valido=True`; Bronze com o bruto e o resultado como metadado) → junto com a Bronze, na fase 8
+- [x] ~~Destino no Data Lake pelos resultados~~ → Data Lake em outra frente do projeto; o critério é o `valido` do resultado
 - [x] Implementar as regras da tabela acima preenchendo esse resultado (a regra de parâmetro sem unidade fica na fase 7)
 
 **Aceite com o dataset atual** (testado em `tests/test_quality_stat.py`):
@@ -255,27 +256,34 @@ Regras por nível:
 
 ---
 
-## Fase 8 — Persistência idempotente (depende de D1)
+## Fase 8 — Persistência idempotente
 
-Ordem, tudo dentro de **uma** transação (`DatabaseConnection.transaction()`):
+Ordem, tudo dentro de **uma** transação (`LeituraRepository.save_readings` → `DatabaseConnection.transaction()`):
 
-- [ ] Estados: só leitura (vem do DML) → cache `sigla → id_estado`
-- [ ] Municípios: `MERGE` por `(nome, estado_id)` → cache
-- [ ] Operadores: grava os valores já protegidos na fase 4 (`nome_hash`, `cpf_hash`, `email_criptografado`); `MERGE` por `codigo_operador` → cache
-- [ ] Estações: `MERGE` por `codigo_estacao` (atualiza nome, município e coordenadas) → cache
+- [x] Estados: só leitura (vem do DML) → `sigla → id_estado`
+- [x] Municípios: `MERGE` por `(nome, estado_id)` → `(municipio, sigla) → id_municipio` (`importar_municipios`)
+- [x] Operadores: grava os valores já protegidos na fase 4 (`nome_hash`, `cpf_hash`, `email_criptografado`); `MERGE` por `codigo_operador` → `codigo → id` (`importar_operadores`)
+- [x] Estações: `MERGE` por `codigo_estacao` (atualiza nome, município e coordenadas) → `codigo → id` (`importar_estacoes`)
 - [x] Parâmetros: fase 7; o retorno de `ParametroService.sincronizar()` já traz `codigo_parametro → ParametroModel` com `id_parametro`
-- [ ] Leituras e itens, **substituição de partição**:
-  1. calcular as partições do lote: pares (`estacao_id`, data de `data_hora_ciclo`)
-  2. `DELETE Leitura_Itens` das leituras dessas partições
-  3. `DELETE Leituras` dessas partições
-  4. inserir as leituras aprovadas e recuperar os `id_leitura` (pela chave natural)
-  5. inserir os itens aprovados
-- [ ] Renomear e adaptar models e repositories (`CidadeModel` → `MunicipioModel` etc.), conforme a seção 7 da análise
-- [ ] Remover os métodos `create` com SQL em f-string de `leitura_repository.py` e `operador_repository.py`
-- [ ] Adaptar `save_readings` e `importar_dados.py` à nova ordem
-- [ ] Data Lake: gravar a Bronze particionada por data (`data_lake/bronze/dt=AAAA-MM-DD/`), sobrescrevendo a partição
+- [x] Leituras e itens, **substituição de partição** (`LeituraRepository.substituir_leituras`), em operações de conjunto:
+  1. carregar o lote em tabelas temporárias da sessão (`#lote`, `#itens`) com `INSERT` de várias linhas (`DatabaseConnection.insert_em_lotes`)
+  2. marcar as leituras já gravadas na mesma estação + dia, ou com o mesmo `codigo_registro`
+  3. `DELETE Leitura_Itens` e depois `DELETE Leituras` dessas leituras
+  4. `INSERT` das leituras do lote e, com `JOIN` por `codigo_registro`, dos itens
+- [x] Renomear e adaptar models e repositories: `MunicipioModel` e `MunicipioRepository` novos; `EstacaoModel`, `OperadorModel` e `LeituraModel` (cabeçalho) no formato do DDL; `LeituraItemModel` novo
+- [x] Remover os métodos `create` com SQL em f-string de `leitura_repository.py` e `operador_repository.py` (e os `get_by_id`/`get_by_name` quebrados)
+- [x] Adaptar `save_readings(registros, parametros, fonte)` e `importar_dados.py` à nova ordem (caches viram valores de retorno, não globais)
+- [x] ~~Data Lake: gravar a Bronze~~ — implementada em `src/ingestion/bronze_writer.py` e **removida em 05/10/2026**: o Data Lake é tratado em outra frente do projeto
+- [x] `run_pipeline()` passa a fazer só a ingestão e devolve o resumo (também registrado em INFO); a análise legada vai para `gerar_relatorio()`; comando `python main.py --ingestao`
+- [ ] Adaptar `CidadeRepository`, as consultas legadas de `EstacaoRepository`/`LeituraRepository`, a análise e a CLI ao modelo 3FN → fase de analytics (fora deste TODO)
 
-**Aceite:** duas execuções seguidas → contagens idênticas; falha no meio → nenhuma linha nova (rollback).
+**Aceite** (banco `impacta`, dataset completo, dentro de uma transação desfeita com rollback ao final):
+
+- [x] 1ª execução: 9.806 leituras e 104.582 itens gravados; 1 município, 1 operador, 1 estação (≈19 s)
+- [x] 2ª execução: 9.806 leituras substituídas e regravadas, contagens idênticas (≈29 s)
+- [x] Nenhuma duplicidade por `codigo_registro` nem por estação + data/hora, nenhuma leitura sem item, nenhum item fora da faixa, nenhum hash fora do padrão nem e-mail em claro
+- [x] Rollback: todas as tabelas voltaram a zero
+- [x] ~~Bronze com o dataset real~~ (removida; ver acima)
 
 ---
 
@@ -346,9 +354,10 @@ GROUP BY P.codigo_parametro ORDER BY 1;
 
 ## Fase 11 — Documentação
 
-- [ ] Atualizar os documentos listados na seção 9 da análise
-- [ ] Preencher o relatório de cada fase na seção 11 da análise
-- [ ] Revisão cruzada: README, arquitetura, diagramas, banco e manual (regras 9 a 11 do COPILOT.md)
+- [x] Atualizar os documentos listados na seção 9 da análise (reescritos para a Parte 2: `modelagem-banco.md`, `contrato-dados.md`, `dicionario-dados.md`, `arquitetura.md`, os três diagramas e `README.md`; ajustados: `requisitos.md`, `analise-estatistica.md`)
+- [x] Preencher o relatório de cada fase na seção 11 da análise (fases 0 a 8 e 11)
+- [x] Revisão cruzada: README, arquitetura, diagramas, banco e manual (regras 9 a 11 do COPILOT.md)
+- [ ] Revisar de novo depois das fases 9 e 10 (primeira carga real e testes de integração)
 
 ---
 

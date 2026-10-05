@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skip(
 def pipeline(monkeypatch, database, connection_string):
     monkeypatch.setattr(config, "load_dotenv", lambda *args, **kwargs: None)
     monkeypatch.setenv("AZURE_SQL_CONNECTIONSTRING", connection_string)
-    monkeypatch.setenv("MOCK_API", "http://api-de-teste")
+    monkeypatch.setenv("FONTE_DADOS", "http://api-de-teste")
 
     def usar_dataset(dados):
         monkeypatch.setattr(main.DataClient, "fetch_data", lambda self: dados)

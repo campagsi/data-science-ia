@@ -35,14 +35,14 @@ Validam a interoperabilidade segura com componentes de infraestrutura:
 |---|---|---|---|---|
 | **CT-01** | `validation` | Leitura com pH igual a $16.5$ (fora da escala físico-química). | Descarte controlado e gravação de log de anomalia sintática. | Atendido: só a medição é descartada (`etapa=acuracia`) e a leitura segue com as demais (`test_valor_fora_da_faixa_descarta_so_o_item`, `test_resultados_da_validacao_viram_linhas_e_contagens`). |
 | **CT-02** | `validation` | Leitura contendo data e hora futura em relação a `now()`. | Rejeição imediata por violação da regra temporal. | Não implementado: a validação não possui regra temporal. |
-| **CT-03** | `persistence` | Inserção simultânea de 2 registros idênticos (mesma estação, data e métrica). | Sem falha catastrófica; o registro existente deve ser atualizado (`upsert`). | Não implementado: o schema não possui `UNIQUE` e o reprocessamento duplica as leituras (`test_reprocessar_o_lote_nao_duplica_leituras`, marcado como `xfail`). |
+| **CT-03** | `persistence` | Inserção simultânea de 2 registros idênticos (mesma estação, data e métrica). | Sem falha catastrófica; o registro existente deve ser atualizado (`upsert`). | Atendido: `UNIQUE (codigo_registro)` (V001) e substituição de partição; registro repetido no lote é rejeitado na validação. Conferido no banco `impacta` com duas cargas (relatório da fase 8). O teste de integração antigo (`xfail`) será reescrito na fase 10. |
 | **CT-04** | `analysis` | Amostra uniforme onde todos os valores de condutividade são iguais. | $IQR = 0$, desvio padrão $0$, nenhum registro marcado como outlier. | Atendido (`test_ct04_amostra_uniforme_nao_gera_outlier`). |
 | **CT-05** | `analysis` | Amostra de oxigênio dissolvido com 99 pontos normais e 1 ponto com $0.05 \text{ mg/L}$. | O ponto destoante deve ser rotulado com `is_outlier = true`. | Atendido com o formato atual: o ponto aparece na lista de outliers, abaixo do limite inferior (`test_ct05_ponto_destoante_e_identificado_como_outlier`). |
 | **CT-06** | `security` | O mesmo CPF escrito com e sem pontuação; o mesmo nome com espaços extras e maiúsculas. | Mesmo hash de 64 caracteres; CPFs diferentes geram hashes diferentes. | Atendido (`test_anonimizar_cpf_e_deterministico_e_ignora_pontuacao`, `test_anonimizar_nome_ignora_espacos_extras_e_maiusculas`, `test_cpfs_diferentes_geram_hashes_diferentes`). |
 | **CT-07** | `security` | E-mail criptografado e lido com a mesma chave e com outra chave. | Mesma chave recupera o e-mail; outra chave falha sem expor o token. | Atendido (`test_criptografia_do_email_e_reversivel`, `test_descriptografar_com_outra_chave_falha_sem_expor_token`). |
 | **CT-08** | `logger` | Rejeição informada com o valor de um campo pessoal (CPF, nome, e-mail ou seus hashes). | A linha do log cita o campo, mas nunca o valor. | Atendido (`test_valor_de_campo_pessoal_nunca_vai_para_o_log`). |
 | **CT-09** | `main` | Aplicação iniciada sem `CHAVE_CRIPTOGRAFIA` ou com chave inválida. | Encerra com código `1`, mensagem `[CRITICAL]` e sem expor a chave. | Atendido (`test_aplicacao_nao_inicia_sem_chave_de_criptografia_valida`). |
-| **CT-10** | `ingestion` | Mesmo dataset carregado duas vezes; backfill de uma data histórica. | Contagens idênticas nas tabelas e nenhuma duplicidade. | Planejado: fases 8 a 10 de [todo-idempotencia.md](todo-idempotencia.md). |
+| **CT-10** | `ingestion` | Mesmo dataset carregado duas vezes; backfill de uma data histórica. | Contagens idênticas nas tabelas e nenhuma duplicidade. | Atendido na fase 8 com o dataset completo no banco `impacta` (transação desfeita ao final). Teste automatizado de integração na fase 10. |
 | **CT-12** | `parametro` | Campo novo no payload (`salinidade` com unidade e `*_tipo_codigo`); o mesmo lote de novo; parâmetro sem unidade. | Cadastrado uma única vez, sem faixa, com as medições importadas; sem unidade, rejeitado com ERROR e só as medições dele descartadas. | Atendido (`test_parametro_novo_e_cadastrado_sem_faixa`, `test_aceite_fase_7_segunda_execucao_nao_cadastra_de_novo`, `test_medicoes_de_parametro_rejeitado_sao_descartadas_na_validacao`). |
 | **CT-11** | `quality` | Leitura sem estação ou operador; medição nula; pH fora de 0–14. | Leitura ou item rejeitado e registrado no log de rejeitados; o resto do lote é gravado. | Atendido na validação e no log (`tests/test_quality_stat.py`, `unit/test_validation_service.py`); a gravação do restante do lote entra na fase 8. |
 
@@ -62,7 +62,7 @@ tests/
 └── test_quality_stat.py   # qualidade com o dataset completo (aceite das fases 5 e 6); estatística na fase de analytics
 ```
 
-O `conftest.py` da raiz define valores de teste antes de importar o código: `AZURE_SQL_CONNECTIONSTRING` e `MOCK_API` (para que nenhum teste acesse o banco real configurado no `.env`) e `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH` (chave Fernet e segredo usados só nos testes). Por isso os testes rodam mesmo que o `.env` local ainda não tenha as chaves.
+O `conftest.py` da raiz define valores de teste antes de importar o código: `AZURE_SQL_CONNECTIONSTRING` e `FONTE_DADOS` (para que nenhum teste acesse o banco real ou a API configurados no `.env`) e `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH` (chave Fernet e segredo usados só nos testes). Por isso os testes rodam mesmo que o `.env` local ainda não tenha as chaves.
 
 | Fixture | Uso |
 |---|---|
@@ -74,7 +74,7 @@ O `conftest.py` da raiz define valores de teste antes de importar o código: `AZ
 
 | Arquivo | O que verifica |
 |---|---|
-| `unit/test_config.py` | `load_config()`: valores válidos, `CHAVE_CRIPTOGRAFIA` obrigatória, leitura de `PEPPER_HASH` e `FONTE_DADOS`, padrões das variáveis opcionais e ausência de segredos na mensagem |
+| `unit/test_config.py` | `load_config()`: valores válidos, `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` e `CHAVE_CRIPTOGRAFIA` obrigatórias, `FONTE_DADOS` com no máximo 100 caracteres, `PEPPER_HASH` opcional e ausência de segredos na mensagem |
 | `unit/test_security.py` | `src/security.py`: hash com 64 caracteres, determinístico e sem o valor original, CPF com pontuação, nome com espaços e maiúsculas, efeito do pepper, `None` para vazio, ida e volta da criptografia do e-mail, token diferente a cada chamada, chave errada ou inválida sem expor segredos e erro quando a segurança não foi configurada (CT-06, CT-07) |
 | `unit/test_sql_scripts.py` | scripts SQL sem banco: 27 UFs no DML, estados e parâmetros do dataset cobertos (código `*_tipo_codigo` e unidade iguais ao payload), nomes de parâmetro únicos, faixas coerentes, pH 0–14, DML só com `MERGE` e ordem dos `DROP` do DDL |
 | `unit/test_parametro_service.py` | `ParametroService` com repositório em memória: parâmetros já cadastrados não são reinseridos, parâmetro novo cadastrado sem faixa com log INFO, segunda execução não cadastra de novo (aceite da fase 7), rejeição com ERROR (sem unidade, nome de outro código, unidade diferente da cadastrada, tamanho acima do DDL), unidade sem diferenciar maiúsculas, dois códigos novos com o mesmo nome, `faixas()`, descarte na validação das medições de parâmetro rejeitado e `INSERT ... WHERE NOT EXISTS` do repositório |
@@ -85,11 +85,11 @@ O `conftest.py` da raiz define valores de teste antes de importar o código: `AZ
 | `test_quality_stat.py` | aceite das fases 5 e 6 com o dataset completo e as faixas do DML: 9.888 resultados, 82 inválidos (50 + 32), 2.681 medições nulas e 603 fora da faixa nos válidos, nenhum item gravável fora da faixa e log de rejeitados com 3.366 linhas sem dado pessoal |
 | `unit/test_analytics_service.py` | média, mediana, desvio padrão e outliers IQR com dados determinísticos (CT-04 e CT-05), consolidação e escopo de `calculate_metrics()` |
 | `unit/test_report_service.py` | `generate_report()` e `format_report()` |
-| `unit/test_metodos_ponte.py` | `connect()`, `transaction()` (conexão única, commit, rollback, aninhamento), `insert_estacao()`, `insert_leituras()` e ordem de `save_readings()` |
-| `unit/test_main.py` | ordem das etapas de `run_pipeline()` (inclusive sincronização de parâmetros e leitura de estados antes da validação), propagação do erro, interrupção das etapas seguintes, ordem de `iniciar_aplicacao()` (logs → configuração → segurança) e código de saída `1` com mensagem `[CRITICAL]` sem expor segredos, inclusive sem chave ou com chave inválida (CT-09) |
+| `unit/test_metodos_ponte.py` | `connect()`, `transaction()` (conexão única, commit, rollback, aninhamento), `insert_estacao()` → `merge_many()`, `insert_leituras()` → `substituir_leituras()`, ordem de `save_readings()` (estados → municípios → operadores → estações → leituras, na mesma transação) e interrupção na primeira falha |
+| `unit/test_main.py` | ordem das etapas de `run_pipeline()` (sincronização de parâmetros, leitura de estados, validação e gravação), resumo devolvido, análise legada fora da ingestão (`gerar_relatorio()`), propagação do erro, interrupção das etapas seguintes, ordem de `iniciar_aplicacao()` (logs → configuração → segurança) e código de saída `1` com mensagem `[CRITICAL]` sem expor segredos, inclusive sem chave ou com chave inválida (CT-09) |
 | `integration/conftest.py` | cria um banco descartável e monta o schema aplicando `sql/ddl_banco_relacional.sql`, `sql/migrations/V*.sql` (o que também verifica que as migrations são idempotentes) e `sql/dml_populacao.sql`; a cada teste, esvazia as tabelas e reaplica o DML |
-| `integration/test_persistencia.py` | **pulado** (`pytest.mark.skip`): ainda usa o modelo antigo (`Cidades`); será reescrito nas fases 8 e 10 do [TODO](todo-idempotencia.md) |
-| `integration/test_pipeline_e2e.py` | **pulado** (`pytest.mark.skip`): mesmo motivo; será reescrito nas fases 8 e 10 |
+| `integration/test_persistencia.py` | **pulado** (`pytest.mark.skip`): ainda usa o modelo antigo (`Cidades`); será reescrito na fase 10 do [TODO](todo-idempotencia.md) |
+| `integration/test_pipeline_e2e.py` | **pulado** (`pytest.mark.skip`): mesmo motivo; será reescrito na fase 10 |
 
 ### 4.2 Preparar o ambiente
 
@@ -122,6 +122,9 @@ python -m pytest tests/unit/test_normalization_service.py
 # cadastro automático de parâmetros
 python -m pytest tests/unit/test_parametro_service.py
 
+# gravação (métodos-ponte, ordem e transação)
+python -m pytest tests/unit/test_metodos_ponte.py
+
 # validação (completude, acurácia, unicidade) e aceite com o dataset completo
 python -m pytest tests/unit/test_validation_service.py tests/test_quality_stat.py
 
@@ -133,7 +136,7 @@ python -m pytest tests/unit/test_main.py -k chave
 python -m pytest tests -rs
 ```
 
-Resultado esperado em 05/10/2026, sem banco de teste: **150 passed, 7 skipped**.
+Resultado esperado em 05/10/2026, sem banco de teste: **152 passed, 7 skipped**.
 
 Os testes de `test_main.py` que executam `python main.py` em um subprocesso criam arquivos em `logs/`. A pasta está no `.gitignore` e pode ser apagada a qualquer momento. Os testes de `test_logger.py` usam uma pasta temporária e não deixam arquivos.
 

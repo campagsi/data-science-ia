@@ -99,9 +99,11 @@ CREATE TABLE Operadores
  
     nome_hash VARCHAR(64) NOT NULL,
     cpf_hash VARCHAR(64) NOT NULL,
-    email_hash VARCHAR(64) NOT NULL,
  
     municipio_id INT NOT NULL,
+ 
+    -- Criptografia reversível (Fernet); migration V002.
+    email_criptografado VARCHAR(255) NULL,
  
     CONSTRAINT UQ_Operadores_Codigo
         UNIQUE (codigo_operador),
@@ -158,6 +160,12 @@ CREATE TABLE Leituras
  
     data_ingestao DATETIME2 NOT NULL
         DEFAULT GETDATE(),
+ 
+    -- registro_codigo do payload; chave natural (migration V001).
+    codigo_registro VARCHAR(50) NOT NULL,
+ 
+    CONSTRAINT UQ_Leituras_CodigoRegistro
+        UNIQUE (codigo_registro),
  
     CONSTRAINT FK_Leituras_Operadores
         FOREIGN KEY (operador_id)
@@ -220,6 +228,10 @@ ON Leituras (estacao_id);
  
 CREATE INDEX IX_Leituras_Operador
 ON Leituras (operador_id);
+ 
+-- Substituição de partição (estação + dia) na carga idempotente; migration V001.
+CREATE INDEX IX_Leituras_Estacao_DataHora
+ON Leituras (estacao_id, data_hora);
  
 CREATE INDEX IX_LeituraItens_Parametro
 ON Leitura_Itens (parametro_id);

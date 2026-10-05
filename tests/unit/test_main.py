@@ -92,8 +92,10 @@ def pipeline_falso(monkeypatch):
         def __init__(self, database):
             pass
 
-        def save_readings(self, registros):
-            chamadas.append(("persistência", registros))
+        def save_readings(self, registros, parametros, fonte):
+            chamadas.append(("persistência", registros, sorted(parametros), fonte))
+            return {"municipios": 1, "operadores": 1, "estacoes": 1,
+                    "leituras_removidas": 0, "leituras_gravadas": 1, "itens_gravados": 1}
 
     class AnaliseFalsa:
         def __init__(self, database):
@@ -105,7 +107,7 @@ def pipeline_falso(monkeypatch):
 
     def carregar_config():
         chamadas.append("configuração")
-        return Settings(mock_api="http://api", azure_sql_connectionstring="Server=teste")
+        return Settings(fonte_dados="http://api", azure_sql_connectionstring="Server=teste")
 
     monkeypatch.setattr(main, "load_config", carregar_config)
     monkeypatch.setattr(main, "DataClient", DataClientFalso)
@@ -125,7 +127,7 @@ def test_importar_main_nao_executa_o_pipeline():
 
 
 def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
-    relatorio = main.run_pipeline()
+    resumo = main.run_pipeline()
 
     assert pipeline_falso == [
         "configuração",
@@ -142,10 +144,30 @@ def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
             },
         ),
         "validação",
-        ("persistência", [REGISTRO_VALIDO]),
-        ("banco da análise", "Server=teste"),
-        "análise",
+        ("persistência", [REGISTRO_VALIDO], ["TIP-PH"], "http://api"),
     ]
+    assert resumo == {
+        "recebidos": 1,
+        "rejeitados_na_normalizacao": 0,
+        "registros_validos": 1,
+        "registros_invalidos": 1,
+        "itens_descartados": 0,
+        "leituras_gravadas": 1,
+        "leituras_substituidas": 0,
+        "itens_gravados": 1,
+    }
+
+
+def test_run_pipeline_nao_executa_a_analise_legada(pipeline_falso):
+    main.run_pipeline()
+
+    assert "análise" not in pipeline_falso
+
+
+def test_gerar_relatorio_usa_a_analise_e_o_relatorio(pipeline_falso):
+    relatorio = main.gerar_relatorio(main.DatabaseConnection("Server=teste"))
+
+    assert pipeline_falso == [("banco da análise", "Server=teste"), "análise"]
     assert relatorio == {"escopo": {"cidade_id": 1}, "periodo": {}, "grupos": {}}
 
 
@@ -159,7 +181,6 @@ def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
         ("EstadoRepository", "get_all"),
         ("ValidationService", "validate_data"),
         ("LeituraRepository", "save_readings"),
-        ("AnaliticsService", "calculate_metrics"),
     ],
 )
 def test_falha_em_qualquer_etapa_propaga_o_erro_original(pipeline_falso, monkeypatch, alvo, metodo):
@@ -181,14 +202,14 @@ def test_falha_interrompe_as_etapas_seguintes(pipeline_falso, monkeypatch):
     with pytest.raises(Falha):
         main.run_pipeline()
 
-    assert ("persistência", [REGISTRO_VALIDO]) not in pipeline_falso
+    assert not any(c[0] == "persistência" for c in pipeline_falso if isinstance(c, tuple))
     assert "análise" not in pipeline_falso
 
 
 def test_execucao_com_falha_termina_com_codigo_1_sem_expor_segredo(tmp_path):
     ambiente = dict(
         os.environ,
-        MOCK_API="",
+        FONTE_DADOS="",
         AZURE_SQL_CONNECTIONSTRING="Server=x;PWD=senha-secreta",
         PYTHONIOENCODING="utf-8",
     )
@@ -204,7 +225,7 @@ def test_execucao_com_falha_termina_com_codigo_1_sem_expor_segredo(tmp_path):
     )
 
     assert processo.returncode == 1
-    assert "ValueError: A variável MOCK_API deve estar configurada." in processo.stderr
+    assert "ValueError: A variável FONTE_DADOS deve estar configurada." in processo.stderr
     assert "senha-secreta" not in processo.stderr + processo.stdout
 
 
@@ -237,7 +258,7 @@ def test_aplicacao_nao_inicia_sem_chave_de_criptografia_valida(chave, mensagem):
 def test_iniciar_aplicacao_configura_logs_antes_da_configuracao(monkeypatch):
     chamadas = []
     settings = Settings(
-        mock_api="http://api",
+        fonte_dados="http://api",
         azure_sql_connectionstring="Server=teste",
         chave_criptografia="chave",
         pepper_hash="pepper",

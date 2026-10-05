@@ -54,7 +54,7 @@ Critérios:
 - falhar com mensagem clara se alguma informação obrigatória estiver ausente.
 
 ### RF02 - Ingestão de dados
-O sistema deve obter dados ambientais de uma API REST pública ou de uma fonte JSON simulada. Na implementação atual, `MOCK_API` aponta para a API FastAPI local do projeto, que disponibiliza o dataset JSON.
+O sistema deve obter dados ambientais de uma API REST pública ou de uma fonte JSON simulada. Na implementação atual, `FONTE_DADOS` aponta para a API FastAPI local do projeto, que disponibiliza o dataset JSON.
 
 Critérios:
 - realizar a leitura dos dados em formato estruturado;
@@ -69,7 +69,7 @@ Critérios:
 - aplicar regras explícitas para campos ausentes/nulos, distinguindo ausência de zero;
 - não persistir valores inconsistentes sem tratamento.
 
-Validação de campos obrigatórios, conversão de tipos e intervalos físicos são regras detalhadas do contrato adotado pelo projeto. Atualmente um registro obrigatório inválido rejeita o lote inteiro; não existe descarte e recuperação individual por registro.
+Validação de campos obrigatórios, conversão de tipos e intervalos físicos são regras detalhadas em [contrato-dados.md](contrato-dados.md). Implementado na Parte 2: a validação devolve um resultado por registro, rejeita só a leitura ou a medição com problema, sem interromper o lote, e tudo o que não é importado vai para o log de rejeitados.
 
 ### RF04 - Tratamento de dados sensíveis
 O sistema deve aplicar regras para reduzir ou eliminar dados sensíveis antes do armazenamento.
@@ -79,6 +79,8 @@ Critérios:
 - registrar quando houver necessidade de mascaramento;
 - garantir que dados pessoais não sejam armazenados sem necessidade.
 
+Implementado na Parte 2: CPF e nome do operador viram hash SHA-256 (ou HMAC-SHA256 com pepper), e o e-mail é criptografado de forma reversível (Fernet), tudo por `src/security.py`. Os originais não seguem para o banco nem para o log ([seguranca-lgpd.md](seguranca-lgpd.md)).
+
 ### RF05 - Persistência no banco
 O sistema deve salvar os dados limpos em banco relacional SQLite ou PostgreSQL, conforme o enunciado original.
 
@@ -87,7 +89,7 @@ Critérios:
 - inserir os dados usando scripts Python;
 - registrar falhas de gravação com retorno de erro adequado.
 
-A implementação atual usa Azure SQL e amplia o modelo com cidades e operadores; registre isso como decisão posterior, sem alterar o requisito original. Unicidade e idempotência por estação/instante são melhorias adicionais.
+A implementação atual usa Azure SQL e o modelo 3FN da Parte 2 (estados, municípios, estações, operadores, parâmetros, leituras e itens), mantido por scripts SQL ([modelagem-banco.md](modelagem-banco.md)). A idempotência, exigida no item 3.7 do projeto final, é garantida por `codigo_registro` único e pela substituição de partição estação + dia.
 
 ### RF06 - Consulta e recuperação de dados
 O sistema deve consultar dados por estação e escrever consultas SQL com agregações por estação, junções (`JOIN`) e filtros por intervalo de datas.
@@ -131,6 +133,8 @@ Critérios:
 - não expor credenciais em logs;
 - manter rastreabilidade do fluxo executado.
 
+Implementado: `src/logger.py` com log da execução (com o resumo da ingestão) e log de rejeitados, com data/hora, severidade e mensagem, sem dados pessoais nem credenciais.
+
 ## 5. Requisitos não funcionais e critérios técnicos complementares
 
 Os itens seguintes detalham boas práticas para a solução. Quando não estiverem explicitamente no enunciado original, devem ser entendidos como critérios adicionais do projeto.
@@ -155,16 +159,16 @@ O sistema deve funcionar em ambientes de execução compatíveis com Python e ba
 
 ## 6. Regras do domínio e extensões
 
-As regras de integridade abaixo detalham o modelo relacional adotado. A regra de idempotência é uma melhoria adicional, não um requisito literal do enunciado.
+As regras de integridade abaixo detalham o modelo relacional adotado. A idempotência passou a ser requisito no projeto final (item 3.7).
 
-1. Toda estação deve pertencer a uma cidade válida.
+1. Toda estação deve pertencer a um município válido, e todo município a um estado cadastrado.
 2. Toda leitura deve estar associada a uma estação existente.
 3. Campos como temperatura, umidade, pressão, pH, oxigênio dissolvido, condutividade e turbidez devem ser validados antes da persistência.
 4. Registros incompletos ou inválidos não devem ser armazenados sem tratamento.
 5. Dados sensíveis devem ser removidos ou mascarados antes do armazenamento.
 6. A análise deve considerar o contexto da estação e do período; agrupamento por cidade é uma extensão.
 7. O sistema deve registrar falhas para facilitar manutenção e correção.
-8. O processamento repetido do mesmo par `estacao_codigo` e `data_hora` não deve criar uma nova leitura.
+8. O processamento repetido do mesmo registro (`codigo_registro`) ou do mesmo período não deve criar uma nova leitura: as leituras de cada estação + dia do lote são substituídas.
 
 ## 7. Casos de uso principais
 

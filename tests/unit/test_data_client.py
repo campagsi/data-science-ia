@@ -20,7 +20,7 @@ class RespostaFalsa:
 
 @pytest.fixture
 def settings():
-    return Settings(mock_api="http://api-de-teste/", azure_sql_connectionstring="x")
+    return Settings(fonte_dados="http://api-de-teste/", azure_sql_connectionstring="x")
 
 
 def test_fetch_data_consulta_endpoint_da_api(monkeypatch, settings):

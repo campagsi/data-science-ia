@@ -1,49 +1,49 @@
-﻿# Pipeline de Monitoramento e Análise de Dados Ambientais
+# Pipeline de Monitoramento e Análise de Dados Ambientais
 
 O enunciado da Parte 1 está em [docs/projeto_modulo_1.md](docs/projeto_modulo_1.md) e o da Parte 2 (projeto final) em [docs/projeto_final.pdf](docs/projeto_final.pdf). O que muda na Parte 2, as decisões e o estado da implementação estão em [docs/analise-implementacao.md](docs/analise-implementacao.md).
 
 ## Visão geral
 
-Este projeto tem como objetivo coletar, validar, persistir e analisar dados ambientais de estações de monitoramento. O fluxo principal do sistema segue uma arquitetura em camadas, com foco em separar responsabilidades entre configuração, domínio, persistência e análise.
-
-A solução trabalha com dados obtidos exclusivamente por uma API REST, armazenando registros em banco relacional e gerando estatísticas úteis para identificação de padrões e outliers.
+Pipeline de dados ambientais de estações de monitoramento: coleta as leituras por uma API REST, normaliza, anonimiza os dados pessoais dos operadores, valida cada registro, grava de forma idempotente num banco relacional 3FN (Azure SQL). Tudo o que não é importado fica registrado num log de rejeitados. O Data Lake (Bronze, Silver e Gold) é tratado em outra frente do projeto.
 
 ## Fluxo principal
 
 ```mermaid
 flowchart LR
-    A[Configuração e credenciais] --> B[Ingestão de dados]
-    B --> C[Validação e limpeza]
-    C --> D[Persistência no banco]
-    D --> E[Consultas e análise estatística]
-    E --> F[Relatório final]
+    A[Configuração, chaves e logs] --> B[Coleta da API]
+    B --> C[Normalização e anonimização]
+    C --> D[Parâmetros e validação]
+    D --> E[Banco 3FN]
+    D --> L[Log de rejeitados]
+    E --> G[Análise e relatório]
 ```
 
-## Arquitetura adotada
+## O que está implementado (Parte 2)
 
-A proposta do projeto é uma arquitetura em camadas, com as seguintes responsabilidades:
+| Etapa | Situação |
+|---|---|
+| Configuração e segurança | `.env` com `FONTE_DADOS`, banco e chaves; CPF e nome em hash SHA-256/HMAC, e-mail criptografado (Fernet) |
+| Logs | Log da execução e log de rejeitados em `logs/`, sem dado pessoal |
+| Normalização | Payload novo (cabeçalho + uma medição por parâmetro), parâmetros descobertos pelo `*_tipo_codigo` |
+| Parâmetros | Parâmetro novo cadastrado automaticamente, sem faixa |
+| Validação | Um resultado por registro (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`); completude, acurácia, referência e unicidade |
+| Banco | Modelo 3FN mantido por SQL (DDL, migrations e DML); gravação idempotente por `MERGE` e substituição de partição estação + dia |
+| Data Lake | Em outra frente do projeto (a pasta `data_lake/` já existe na estrutura) |
+| Análise e relatório | Ainda no modelo da Parte 1; adaptação na fase de analytics |
 
-1. Configuração e ambiente
-   - carregamento de variáveis de ambiente
-   - proteção de credenciais e endpoints
+O andamento por fase está em [docs/todo-idempotencia.md](docs/todo-idempotencia.md), e os relatórios em [docs/analise-implementacao.md](docs/analise-implementacao.md).
 
-2. Modelo de domínio
-   - entidades como `Cidade`, `Operador`, `Estacao` e `Leitura`
+## Como executar
 
-3. Serviços e regras de negócio
-   - ingestão do JSON bruto
-   - normalização de strings numéricas, booleanas e datas
-   - validação e limpeza
-   - análise estatística
-   - geração de relatórios
+```bash
+pip install -r requirements.txt
+python -m uvicorn src.api.app:app          # API com o dataset (outro terminal)
+python main.py --ingestao                  # ingestão: banco + logs
+python main.py                             # CLI de consulta
+python -m pytest tests                     # testes
+```
 
-4. Persistência e acesso a dados
-   - conexão com o banco
-   - criação de tabelas
-   - consultas e gravações
-
-5. Orquestração da aplicação
-   - execução do pipeline completo
+Antes da primeira execução, crie o `.env` a partir do `.env.example` e prepare o banco com `sql/ddl_banco_relacional.sql` e `sql/dml_populacao.sql`. O passo a passo está em [docs/manual-execucao.md](docs/manual-execucao.md).
 
 ## Estrutura do projeto
 
@@ -83,7 +83,7 @@ Data-Science-Ia/
 │   ├── unit/                   # testes sem banco e sem rede
 │   ├── integration/            # SQL Server descartável; ignorados sem configuração
 │   └── test_quality_stat.py    # testes de qualidade e estatística
-├── main.py                     # inicialização (iniciar_aplicacao), CLI e orquestração do pipeline (run_pipeline)
+├── main.py                     # inicialização, CLI e ingestão (python main.py --ingestao)
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -119,24 +119,17 @@ python -m pytest tests
 
 Os testes unitários não dependem da API, do banco nem das chaves do `.env`; incluem os de segurança (`test_security.py`) e de logs (`test_logger.py`). Os de integração só rodam com um SQL Server de teste configurado. O guia completo, os comandos e a matriz de cenários estão em [docs/plano-testes.md](docs/plano-testes.md).
 
-## Objetivo do sistema
+## Contrato de entrada
 
-O projeto busca:
-
-- coletar dados ambientais pela API REST configurada
-- limpar e validar registros inconsistentes
-- persistir as informações em banco relacional
-- gerar consultas e estatísticas por estação, período e parâmetro
-- identificar outliers e apoiar análise exploratória dos dados
-
-## Contrato atual de entrada
-
-O sistema recebe registros ambientais com campos de cidade, operador, estação e leitura. A fonte atual envia números e booleanos como strings, por exemplo `"20.5"` e `"true"`.
-
-O pipeline converte esses valores para os tipos internos antes de validar e persistir. O contrato completo, as regras de qualidade e o dicionário de campos estão em [docs/contrato-dados.md](docs/contrato-dados.md) e [docs/dicionario-dados.md](docs/dicionario-dados.md).
-
-Os registros incluem dados meteorológicos e de qualidade da água, como temperatura, pressão, vento, pH, oxigênio dissolvido, condutividade e turbidez.
+Cada registro da API é um ciclo de leitura de uma estação: estado, município, estação, operador (com CPF, nome completo e e-mail) e, para cada parâmetro, o valor, a unidade, o código do tipo e a hora da medição. O payload atual tem 9.888 registros e 11 parâmetros. O contrato completo está em [docs/contrato-dados.md](docs/contrato-dados.md), e os campos em [docs/dicionario-dados.md](docs/dicionario-dados.md).
 
 ## Status
 
-A aplicação usa uma API FastAPI local para servir JSON simulado, opção permitida pelo enunciado, mas usa Azure SQL em vez de SQLite ou PostgreSQL, opções citadas no trabalho. Permanecem parciais a anonimização/exclusão de identificadores, a apresentação de IQR como métrica, a agregação SQL por estação e a criação do schema em banco vazio. As pendências e o plano de implementação estão em [docs/analise-implementacao.md](docs/analise-implementacao.md) e [docs/todo-idempotencia.md](docs/todo-idempotencia.md).
+- O banco `impacta` está igual ao DDL, com as migrations V001 e V002 e o DML de domínio (27 estados e 11 parâmetros) aplicados.
+- A ingestão foi validada no banco real com o dataset completo carregado duas vezes, dentro de uma transação desfeita ao final: 9.806 leituras e 104.582 medições, sem nenhuma duplicidade.
+- **Próximos passos:**
+  - primeira carga real e conferência no banco (fase 9);
+  - reescrita dos testes de integração (fase 10);
+  - adaptação da análise e da CLI ao modelo 3FN;
+  - camadas Silver e Gold.
+- A aplicação usa Azure SQL; o enunciado da Parte 1 citava SQLite ou PostgreSQL.

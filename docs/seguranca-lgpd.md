@@ -14,7 +14,7 @@ Item 3.7: logs estruturados com data/hora, severidade (INFO, WARNING, ERROR) e m
 |---|---|---|---|
 | `operador_cpf` | Anonimização irreversível | SHA-256 | `Operadores.cpf_hash` |
 | `operador_nome_completo` | Anonimização irreversível | SHA-256 | `Operadores.nome_hash` |
-| `operador_email` | Criptografia reversível | Fernet (simétrica) | `Operadores.email_*` (ver decisão D7 em [analise-implementacao.md](analise-implementacao.md)) |
+| `operador_email` | Criptografia reversível | Fernet (simétrica) | `Operadores.email_criptografado` (decisão D7, migration V002) |
 | `operador_codigo`, `estacao_codigo`, nomes de estação e coordenadas | Mantidos | — | Identificam equipamento e local, não pessoa; são necessários para os relacionamentos |
 
 ## Módulo central: `src/security.py`
@@ -53,7 +53,7 @@ Seguindo o fluxo de `transform.py` do exemplo (proteção → regra de negócio 
 
 Como o dado em claro deixa de existir no registro depois do passo 3, nenhuma etapa posterior consegue gravá-lo no banco ou no log por engano.
 
-**Camada Bronze:** o enunciado (3.1) pede o JSON bruto em formato original na Bronze, então os dados pessoais ficam em claro **somente** em `data_lake/bronze/`. Essa pasta tem acesso restrito, e os arquivos de dados dela não podem ir para o Git (só o `.gitkeep`). A partir da Silver e no banco relacional, apenas a versão anonimizada.
+**Camada Bronze (outra frente do projeto):** a ingestão deste repositório não grava no Data Lake. Para quem implementar a Bronze: o enunciado (3.1) pede o JSON bruto em formato original, então os dados pessoais ficam em claro **somente** em `data_lake/bronze/`. Essa pasta tem acesso restrito, e os arquivos de dados dela não podem ir para o Git (só o `.gitkeep`). A partir da Silver e no banco relacional, apenas a versão anonimizada.
 
 ## Logs: módulo central `src/logger.py`
 

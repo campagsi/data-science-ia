@@ -35,7 +35,7 @@ Conexão feita no banco `impacta` (Azure SQL) com consultas somente de leitura e
 | Antes (Parte 1) | Depois (Parte 2) | Mudança |
 |---|---|---|
 | `Cidades (nome, estado CHAR 2)` | `Estados` + `Municipios` | Estado vira tabela própria (3FN). `Estados.nome` é obrigatório e o payload só traz a sigla, por isso os estados precisam vir de carga inicial (DML). |
-| `Operadores (codigo, nome, tipo, cidade_id)` | `Operadores (codigo_operador, nome_hash, cpf_hash, email_hash, municipio_id)` | Nome e CPF como hash SHA-256; o e-mail precisa de criptografia reversível (D7). `tipo` deixa de existir. Regras em [seguranca-lgpd.md](seguranca-lgpd.md). |
+| `Operadores (codigo, nome, tipo, cidade_id)` | `Operadores (codigo_operador, nome_hash, cpf_hash, municipio_id, email_criptografado)` | Nome e CPF como hash SHA-256; e-mail criptografado (D7, migration V002). `tipo` deixa de existir. Regras em [seguranca-lgpd.md](seguranca-lgpd.md). |
 | `Estacoes (..., operador_id, ativa, tipo)` | `Estacoes (codigo_estacao, nome, municipio_id, latitude, longitude)` | Estação deixa de apontar para operador; o operador passa a ficar na leitura. `ativa` e `tipo` deixam de existir. |
 | `Leituras` larga (uma coluna por medição) | `Leituras` (cabeçalho) + `Leitura_Itens` (um item por parâmetro) + `Parametros` (domínio) | Medição vira linha, e parâmetro novo não exige mais `ALTER TABLE`. |
 | — | `Leituras.operador_id NOT NULL` | Toda leitura exige operador. |
@@ -57,16 +57,18 @@ Payload atual da API (`src/api/data_set.json`): **9.888 registros**, um registro
 | `estacao_ativa`, `estacao_tipo` | — | Sem coluna no DDL (D5). |
 | `operador_codigo` | `Operadores.codigo_operador` | |
 | `operador_nome_completo`, `operador_cpf` | `nome_hash`, `cpf_hash` | `anonimizar_nome` / `anonimizar_cpf` de `src/security.py` (SHA-256, 64 caracteres). |
-| `operador_email` | `email_hash` → `email_criptografado` (D7) | `criptografar_email` de `src/security.py` (Fernet, reversível). |
+| `operador_email` | `Operadores.email_criptografado` (D7, migration V002) | `criptografar_email` de `src/security.py` (Fernet, reversível). |
 | — | — | Os três campos originais são removidos do registro logo após a anonimização (minimização); depois disso nada os grava nem loga. Ver [seguranca-lgpd.md](seguranca-lgpd.md). |
 | `operador_ativo` | — | Sem coluna no DDL (D5). |
-| `registro_codigo` | `Leituras` (chave natural) | **Sem coluna no DDL**, mas é o identificador natural da leitura (D1). |
+| `registro_codigo` | `Leituras.codigo_registro` (chave natural, `UNIQUE`) | Coluna criada pela migration V001 (D1). |
 | `data_hora_ciclo` | `Leituras.data_hora` | |
 | — | `Leituras.fonte` | **Não existe no payload** e a coluna é `NOT NULL` (D3). |
 | `<param>` | `Leitura_Itens.valor` | Valor nulo → não grava o item e registra no log de rejeitados. |
 | `<param>_tipo_codigo` (ex.: `TIP-PH`) | `Parametros.codigo_parametro` | Base da descoberta de parâmetros novos. |
 | `<param>_unidade_medida` | `Parametros.unidade_medida` | Exceções no payload: `oxigenio_dissolvido_medida` e `velocidade_unidade_medida`. |
 | `<param>_codigo` (ex.: `PH-RJ001-00001`), `data_hora_leitura_<param>` | — | Sem coluna no DDL (D5). |
+
+> **Referência vigente:** o contrato do payload, do registro normalizado e do resultado da validação passou a ficar em [contrato-dados.md](contrato-dados.md). As subseções abaixo registram como o desenho foi decidido.
 
 ### Formato do registro normalizado (fase 4)
 
@@ -164,7 +166,7 @@ Quem usa o resultado:
 | Consumidor | Uso |
 |---|---|
 | Log (`src/logger.py`) | Uma única função percorre os resultados e grava no `rejeitados_*.log`: uma linha por registro inválido (com todos os `campos_nulos`) e uma por item inválido. Assim o formato do log fica igual para todas as regras. |
-| Data Lake | Silver (fase futura) recebe só `valido=True`. A Bronze guarda o bruto do lote, como o enunciado pede (item 3.1), e pode gravar junto o resultado (`valido`, `campos_nulos`) como metadado de controle. |
+| Data Lake | Em outra frente do projeto. O critério para o lake é o mesmo: só `valido=True` ("os dados brutos aprovados", item 3.1 do enunciado). |
 | Entidades (banco) | A persistência (fase 8) recebe só `registro` dos resultados com `valido=True`. |
 | Resumo | Recebidos = válidos + inválidos; itens gravados e itens rejeitados saem dos mesmos resultados. |
 
@@ -193,7 +195,7 @@ O `transform.py` do exemplo usa outro mecanismo, uma marca `status_pipeline = 'C
 
 ### No Data Lake
 
-A mesma regra vale para `data_lake/bronze`: arquivos particionados por data de ciclo (`data_lake/bronze/dt=AAAA-MM-DD/...json`), e a reexecução sobrescreve a partição em vez de acrescentar.
+O Data Lake é tratado em outra frente do projeto. A regra sugerida para ele é a mesma: arquivos particionados por data de ciclo, com a reexecução sobrescrevendo a partição em vez de acrescentar.
 
 ### Critério de aceite
 
@@ -236,20 +238,22 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 
 | Arquivo | O que muda |
 |---|---|
-| [main.py](../main.py) | Chamada `criar_tabelas()` removida; `iniciar_aplicacao()` chama `configurar_logs()` uma vez; `print` trocado por log (fases 2 e 3). |
+| [main.py](../main.py) | Chamada `criar_tabelas()` removida; `iniciar_aplicacao()` chama `configurar_logs()` uma vez; `print` trocado por log (fases 2 e 3). Na fase 8, `run_pipeline()` passou a fazer só a ingestão (com resumo), a análise foi para `gerar_relatorio()` e foi criado o comando `python main.py --ingestao`. |
+| `src/ingestion/bronze_writer.py` | Criado na fase 8 e **removido em 05/10/2026**: o Data Lake é tratado em outra frente do projeto. |
 | `src/services/parametro_service.py` (novo, fase 7) | `sincronizar()`: cadastra parâmetros novos sem faixa e rejeita, com ERROR, os que não podem ser usados; `faixas()` para a validação. |
 | `src/logger.py` (novo) | Configuração única de log: `configurar_logs()`, loggers `DataScienceIA_Logger` e `DataScienceIA_Rejeitados`, `registrar_rejeicao(...)`. |
 | `src/security.py` (novo) | Único ponto de anonimização e criptografia: `anonimizar_cpf`, `anonimizar_nome`, `criptografar_email`, `descriptografar_email` ([seguranca-lgpd.md](seguranca-lgpd.md)). |
 | [src/config.py](../src/config.py) | Ler `CHAVE_CRIPTOGRAFIA` (e `PEPPER_HASH`, se D8 aprovada) e falhar se ausente, sem expor o valor. |
-| [.env.example](../.env.example) | Incluir `CHAVE_CRIPTOGRAFIA`, `PEPPER_HASH` e `FONTE_DADOS` (só os nomes). |
+| [.env.example](../.env.example) | Incluir `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH` (só os nomes). `MOCK_API` foi renomeada para `FONTE_DADOS` (D3). |
 | `src/database/criar_tabelas.py` | **Removido** (criava o modelo antigo). O schema vem do DDL e das migrations. |
-| `sql/migrations/` (novo) | Uma migration idempotente `VNNN__descricao.sql` por mudança de estrutura; o DDL é atualizado na mesma entrega. |
+| `sql/migrations/` (novo) | Uma migration idempotente `VNNN__descricao.sql` por mudança de estrutura; o DDL é atualizado na mesma entrega. Aplicadas: `V001__leituras_codigo_registro.sql` (D1) e `V002__operadores_email_criptografado.sql` (D7). |
+| [src/database/connection.py](../src/database/connection.py) | `insert_em_lotes()` (fase 8): `INSERT` de várias linhas por comando, respeitando o limite de parâmetros do SQL Server. |
 | [src/ingestion/data_client.py](../src/ingestion/data_client.py) | Adicionar tratamento de queda de conexão, resposta vazia e rate limit, com logs (padrão de `extrair_dados_api`). |
-| [src/ingestion/importar_dados.py](../src/ingestion/importar_dados.py) | Reescrita para a nova ordem: Estados (busca) → Municípios → Operadores → Estações → Parâmetros → Leituras/Itens (por partição). Os caches `__cidades`, `__operadores` e `__estacoes` passam a ser municípios, operadores, estações e parâmetros. |
+| [src/ingestion/importar_dados.py](../src/ingestion/importar_dados.py) | **Reescrito na fase 8:** `importar_municipios`, `importar_operadores`, `importar_estacoes` e `importar_leituras`, cada uma idempotente e devolvendo o mapa chave → id. Plano original: reescrita para a nova ordem: Estados (busca) → Municípios → Operadores → Estações → Parâmetros → Leituras/Itens (por partição). Os caches `__cidades`, `__operadores` e `__estacoes` passam a ser municípios, operadores, estações e parâmetros. |
 | [src/services/normalization_service.py](../src/services/normalization_service.py) | **Reescrito na fase 4:** payload novo, cabeçalho + itens, descoberta de parâmetros, anonimização e minimização, rejeição por item ou leitura sem derrubar o lote. |
 | [src/services/validation_service.py](../src/services/validation_service.py) | **Reescrito nas fases 5 e 6:** um resultado por registro (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`, `registro`; contrato na seção 4), sem abortar o lote. Faixas, siglas e parâmetros aceitos recebidos no construtor; a `run_pipeline()` os lê do banco desde a fase 7. |
-| [src/models/](../src/models/) | `CidadeModel` → `MunicipioModel`; `EstadoModel` já existe; `ParametroModel` criado na fase 7; novo `LeituraItemModel`; `LeituraModel` vira cabeçalho (`operador_id`, `estacao_id`, `data_hora`, `fonte`); `OperadorModel` e `EstacaoModel` seguem as colunas do DDL. |
-| [src/repository/](../src/repository/) | `CidadeRepository` → `MunicipioRepository`; `EstadoRepository` já existe; `ParametroRepository` criado na fase 7; novo repositório de itens de leitura; todos os `create_many` passam a ser idempotentes (`MERGE`/partição). Há métodos com SQL montado por f-string (`create` em `leitura_repository.py` e `operador_repository.py`) que precisam sair. |
+| [src/models/](../src/models/) | **Fase 8:** `MunicipioModel` e `LeituraItemModel` novos; `EstacaoModel`, `OperadorModel` e `LeituraModel` no formato do DDL; `CidadeModel` mantido só para a análise legada. Plano original: `CidadeModel` → `MunicipioModel`; `EstadoModel` já existe; `ParametroModel` criado na fase 7; novo `LeituraItemModel`; `LeituraModel` vira cabeçalho (`operador_id`, `estacao_id`, `data_hora`, `fonte`); `OperadorModel` e `EstacaoModel` seguem as colunas do DDL. |
+| [src/repository/](../src/repository/) | **Fase 8:** `MunicipioRepository` novo; `OperadorRepository` reescrito (`MERGE`); `EstacaoRepository.merge_many`; `LeituraRepository.substituir_leituras` e `save_readings` novos; métodos com f-string e consultas quebradas removidos; `CidadeRepository` e as consultas legadas mantidos só para a análise. Plano original: `CidadeRepository` → `MunicipioRepository`; `EstadoRepository` já existe; `ParametroRepository` criado na fase 7; novo repositório de itens de leitura; todos os `create_many` passam a ser idempotentes (`MERGE`/partição). Há métodos com SQL montado por f-string (`create` em `leitura_repository.py` e `operador_repository.py`) que precisam sair. |
 | [src/services/analytics_service.py](../src/services/analytics_service.py), [src/cli/](../src/cli/), [src/services/report_service.py](../src/services/report_service.py) | Consultam `Cidades` e as colunas largas de `Leituras` e **vão quebrar**. Precisam ler `Leitura_Itens` + `Parametros` e pivotar no pandas. Fica fora do TODO de idempotência e entra na fase de analytics. |
 | [requirements.txt](../requirements.txt) | Adicionar `cryptography` (Fernet). O `src/cli` também usa `rich`, que não está listado. |
 | [sql/dml_populacao.sql](../sql/dml_populacao.sql) | Carga inicial: 27 estados e os 11 parâmetros conhecidos, com faixas. |
@@ -289,14 +293,14 @@ Precisam de resposta antes da fase correspondente do TODO.
 
 | # | Decisão | Opções | Recomendação |
 |---|---|---|---|
-| D1 | Chave natural de `Leituras` (o DDL não tem nenhuma) | (a) nova coluna `codigo_registro VARCHAR(50) NOT NULL` + `UNIQUE`; (b) `UNIQUE (estacao_id, data_hora)` | **(a)**: é o identificador do enunciado ("Identificador do Pedido/Leitura") e vem pronto no payload. Exige alterar o DDL e o banco. |
+| D1 | Chave natural de `Leituras` (o DDL não tem nenhuma) | (a) nova coluna `codigo_registro VARCHAR(50) NOT NULL` + `UNIQUE`; (b) `UNIQUE (estacao_id, data_hora)` | **Aprovada (a) em 05/10/2026; migration V001.** é o identificador do enunciado ("Identificador do Pedido/Leitura") e vem pronto no payload. Exige alterar o DDL e o banco. |
 | D2 | Leitura com estação mas **sem operador** (32 registros) | (a) rejeitar; (b) `operador_id` passa a aceitar `NULL`; (c) operador "NÃO INFORMADO" | **(a)**, que mantém o DDL; os 32 vão para o log de rejeitados. |
-| D3 | `Leituras.fonte` é `NOT NULL` e o payload não traz fonte | (a) constante, ex.: `API_MOCK`; (b) host da `MOCK_API`; (c) campo no `.env` | **(c)** `FONTE_DADOS` no `.env`, com padrão `API_MOCK`. |
+| D3 | `Leituras.fonte` é `NOT NULL` e o payload não traz fonte | (a) constante, ex.: `API_MOCK`; (b) URL da API; (c) campo no `.env` | **Definida em 05/10/2026: uma variável só, `FONTE_DADOS`, com a URL da API.** Ela substitui a antiga `MOCK_API`: é usada na coleta e gravada em `Leituras.fonte` (máximo de 100 caracteres, conferido no `load_config()`). |
 | D4 | `ValidationService.validate_data` aborta o lote inteiro | Alterar para rejeição por registro e por item | **Aprovada em 05/10/2026**: o CLAUDE.md passou a permitir alteração de lógica na Parte 2. Necessária para "salvar log de tudo que não foi importado". |
 | D5 | Campos do payload sem coluna no DDL: `cidade_codigo`, `estacao_ativa`, `estacao_tipo`, `operador_ativo`, `<param>_codigo`, `data_hora_leitura_<param>` | (a) descartar; (b) adicionar colunas | **(a)** por ora, registrando no `INFO` de resumo. Reavaliar `data_hora_leitura_<param>` (hora exata de cada medição) para a Gold. |
 | D6 | Faixas de `valor_minimo`/`valor_maximo` dos 11 parâmetros | Proposta no TODO (fase 3) | **Proposta aplicada no `dml_populacao.sql` em 05/10/2026, aguardando validação do time.** pH 0–14 e umidade 0–100 vêm do enunciado e do código atual. Para mudar, basta editar o DML e reexecutá-lo (`MERGE` atualiza as faixas). |
-| D7 | Onde gravar o e-mail criptografado: `email_hash VARCHAR(64)` não comporta um token Fernet (cerca de 140 caracteres para um e-mail comum) | (a) trocar `email_hash` por `email_criptografado VARCHAR(255) NULL`; (b) manter `email_hash` e adicionar `email_criptografado`; (c) só hash, sem recuperação | **(a)**: segue o exemplo `security.py` e o item 3.2 do enunciado (reversível para dado que exige recuperação). Exige alterar o DDL e o banco, junto com a D1. |
-| D8 | Hash de CPF e nome com pepper | (a) SHA-256 puro, como no exemplo; (b) SHA-256 de `PEPPER_HASH` + valor | **(b)**: o CPF tem só 10¹¹ combinações e o SHA-256 puro pode ser revertido por força bruta. Mantém os 64 caracteres. |
+| D7 | Onde gravar o e-mail criptografado: `email_hash VARCHAR(64)` não comporta um token Fernet (cerca de 140 caracteres para um e-mail comum) | (a) trocar `email_hash` por `email_criptografado VARCHAR(255) NULL`; (b) manter `email_hash` e adicionar `email_criptografado`; (c) só hash, sem recuperação | **Aprovada (a) em 05/10/2026; migration V002.** segue o exemplo `security.py` e o item 3.2 do enunciado (reversível para dado que exige recuperação). Exige alterar o DDL e o banco, junto com a D1. |
+| D8 | Hash de CPF e nome com pepper | (a) SHA-256 puro, como no exemplo; (b) SHA-256 de `PEPPER_HASH` + valor | **Implementada configurável na fase 2** (`PEPPER_HASH` preenchido = HMAC-SHA256). Recomendação mantida: (b). o CPF tem só 10¹¹ combinações e o SHA-256 puro pode ser revertido por força bruta. Mantém os 64 caracteres. |
 
 ---
 
@@ -312,7 +316,17 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 
 ### Fase 1 — Decisões
 
-- **Status:** pendente.
+- **Status:** concluída em 05/10/2026.
+- **Decisões:**
+  - D1 = (a) `codigo_registro`;
+  - D2 = rejeitar e logar;
+  - D3 = `FONTE_DADOS` no `.env`, com a URL da API, que substitui `MOCK_API` e é gravada em `Leituras.fonte`;
+  - D4 = aprovada;
+  - D5 = descartar;
+  - D6 = proposta aplicada no DML, aguardando validação;
+  - D7 = (a) `email_criptografado`;
+  - D8 = configurável.
+- **Alterações no banco:** migrations `V001` e `V002` criadas, `ddl_banco_relacional.sql` atualizado para o estado final, as duas aplicadas no banco `impacta` (com `Leituras` e `Operadores` vazias; cada uma executada duas vezes) e Fase 0 repetida. O banco ficou igual ao DDL. A coluna `email_criptografado` foi posta no fim de `Operadores` também no DDL, para que um banco criado do zero tenha a mesma ordem do banco migrado.
 
 ### Fase 2 — Módulos centrais de log e segurança
 
@@ -320,7 +334,7 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 - **Alterações:**
   - `src/logger.py` (novo): `configurar_logs()`, loggers `DataScienceIA_Logger` e `DataScienceIA_Rejeitados`, `registrar_rejeicao()`, `contar_rejeicoes()`, `registrar_resumo()`.
   - `src/security.py` (novo): `configurar_seguranca()`, `anonimizar_cpf()`, `anonimizar_nome()`, `criptografar_email()`, `descriptografar_email()`.
-  - `src/config.py`: `Settings` ganhou `chave_criptografia`, `pepper_hash` e `fonte_dados` (com padrão, então as chamadas antigas continuam válidas); `CHAVE_CRIPTOGRAFIA` passou a ser obrigatória.
+  - `src/config.py`: `Settings` ganhou `chave_criptografia` e `pepper_hash`; `CHAVE_CRIPTOGRAFIA` passou a ser obrigatória. Depois, `mock_api` foi substituído por `fonte_dados` (ver D3).
   - `main.py`: nova `iniciar_aplicacao()` (logs → configuração → segurança), chamada antes da CLI; `print` trocado por `logger`.
   - `src/ingestion/importar_dados.py`: `print` do bloco `__main__` trocado por log.
   - `requirements.txt`: `cryptography` e `rich` (a CLI já usava `rich`, mas ele não estava listado e os testes nem chegavam a rodar).
@@ -438,7 +452,38 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 
 ### Fase 8 — Persistência idempotente
 
-- **Status:** pendente.
+- **Status:** concluída em 05/10/2026. A adaptação da análise e da CLI ao modelo 3FN fica para a fase de analytics.
+- **Alterações:**
+  - Modelos no formato do DDL: `MunicipioModel` e `LeituraItemModel` novos; `EstacaoModel`, `OperadorModel` e `LeituraModel` reescritos.
+  - Repositórios:
+    - `MunicipioRepository` novo e `OperadorRepository` reescrito, ambos com `MERGE`;
+    - `EstacaoRepository.merge_many`;
+    - `LeituraRepository.substituir_leituras` e `save_readings(registros, parametros, fonte)`;
+    - removidos os métodos com SQL em f-string e as consultas quebradas (`get_by_id` e `get_by_name`, que consultavam `operadores`).
+  - `DatabaseConnection.insert_em_lotes()`.
+  - `src/ingestion/importar_dados.py` reescrito: uma função por entidade, com os mapas como retorno em vez de caches globais.
+  - `src/ingestion/bronze_writer.py` (novo).
+  - `main.py`:
+    - `run_pipeline()` faz só a ingestão e devolve o resumo, que também vai para o log com `registrar_resumo`;
+    - `gerar_relatorio()` guarda a análise legada;
+    - `python main.py --ingestao` executa a carga.
+  - Testes: `test_bronze_writer.py` (novo); `test_metodos_ponte.py` e `test_main.py` adaptados, incluindo "a Bronze não é gravada se o banco falhar".
+- **Decisões:**
+  - A substituição de partição usa tabelas temporárias e operações de conjunto: um `DELETE` e um `INSERT` para mais de 100 mil itens, em vez de uma ida ao Azure por linha. Além da partição (estação + dia), também apaga a leitura que já tinha o mesmo `codigo_registro` em outro dia, para a `UNIQUE` nunca derrubar a carga.
+  - Uma partição em que **todos** os registros do lote são inválidos não é tocada: as leituras antigas dela permanecem.
+  - A Bronze guarda só os aprovados (PDF 3.1) e é gravada depois do commit, então o lake não fica à frente do banco. Isso corrige a seção 4, que dizia "bruto do lote inteiro".
+  - A análise legada consulta tabelas que não existem mais e quebraria a carga logo depois de gravar. Por isso saiu do `run_pipeline()`. `CidadeRepository` e as consultas antigas continuam no código só para a CLI importar sem erro.
+  - O e-mail criptografado é regravado a cada carga, porque o token Fernet muda; a contagem de operadores não muda.
+- **Validações:**
+  - `pytest`: **159 passaram e 7 foram pulados**.
+  - **Banco `impacta`, dataset completo, duas cargas na mesma transação, desfeitas com rollback ao final:**
+    - 1ª carga: 9.806 leituras e 104.582 itens, em cerca de 19 s;
+    - 2ª carga: 9.806 removidas e regravadas, com as mesmas contagens, em cerca de 29 s;
+    - zero duplicidades, leituras sem item, itens fora da faixa ou e-mails em claro;
+    - todas as tabelas voltaram a zero depois do rollback.
+  - Bronze com o dataset real: 206 partições e 9.806 registros (26 MB). Depois de duas execuções, continuam 9.806. `data_lake/bronze/dt=*/leituras.json` é ignorado pelo Git.
+- **Atualização (05/10/2026):** a Bronze (`bronze_writer.py`, `test_bronze_writer.py` e a chamada em `run_pipeline()`) foi removida a pedido do time, porque o Data Lake é tratado em outra frente. A ingestão grava só no banco. Os itens de Bronze acima ficam como histórico. Testes: **152 passaram e 7 foram pulados**.
+- **Nada foi gravado de forma definitiva** em `Municipios`, `Operadores`, `Estacoes`, `Leituras` ou `Leitura_Itens`: a primeira carga real é o passo da fase 9.
 
 ### Fase 9 — Validação do banco após a carga
 
@@ -450,4 +495,24 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 
 ### Fase 11 — Documentação
 
-- **Status:** pendente.
+- **Status:** concluída em 05/10/2026 para o que foi implementado até a fase 8. Revisar de novo depois das fases 9 e 10.
+- **Reescritos para a Parte 2:**
+  - `modelagem-banco.md`: modelo 3FN com diagrama, colunas, índices, idempotência e situação do banco;
+  - `contrato-dados.md`: payload, regra dos parâmetros, normalização, resultado da validação e saídas;
+  - `dicionario-dados.md`: campos, destinos, os 11 parâmetros com faixas e perfil do dataset;
+  - `arquitetura.md`: módulos reais por camada;
+  - `diagramas/diagrama-sequencia.md`, `diagrama-atividade.md` e `diagrama-contexto.md`: fluxo da ingestão implementada;
+  - `README.md`: visão geral, quadro do que está implementado, como executar e status.
+- **Ajustados:**
+  - `requisitos.md`: situação de RF03, RF04, RF05 e RF10 e regras 1 e 8;
+  - `analise-estatistica.md`: análise ainda no modelo antigo e itens novos do PDF 3.4;
+  - esta análise: aviso de que o contrato vigente está em `contrato-dados.md`.
+- **Decisão:** cada assunto tem um documento de referência, sem repetir o conteúdo (COPILOT.md, regras 2 e 7):
+  - banco → `modelagem-banco.md`;
+  - payload e regras → `contrato-dados.md`;
+  - campos → `dicionario-dados.md`;
+  - segurança e logs → `seguranca-lgpd.md`;
+  - execução → `manual-execucao.md`.
+
+  Esta análise fica como histórico das mudanças e das decisões.
+- **Validações:** nenhum link quebrado nos `.md` de `docs/` e no README; nenhuma referência restante a `Cidades`, `criar_tabelas`, `validar_estacao` ou `MOCK_API` fora dos trechos que explicam a mudança.

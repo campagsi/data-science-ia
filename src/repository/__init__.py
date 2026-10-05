@@ -4,3 +4,4 @@ from .leitura_repository import LeituraRepository
 from .operador_repository import OperadorRepository
 from .estado_repository import EstadoRepository
 from .parametro_repository import ParametroRepository
+from .municipio_repository import MunicipioRepository

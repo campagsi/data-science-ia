@@ -12,7 +12,7 @@ class DataClient:
     def fetch_data(self) -> list[dict[str, Any]]:
         """Obtém o dataset exclusivamente pela API configurada."""
         response = requests.get(
-            f"{self.__settings.mock_api.rstrip('/')}/api/v1/data-set",
+            f"{self.__settings.fonte_dados.rstrip('/')}/api/v1/data-set",
             timeout=30,
         )
         response.raise_for_status()

@@ -62,3 +62,10 @@ Registrar a quantidade de valores descartados por erro de conversão é uma melh
 ## Situação da implementação
 
 O serviço calcula quantidade, média, mediana e desvio padrão. Usa Q1, Q3 e IQR para definir os limites de outliers, mas não apresenta o IQR como métrica no resumo. Portanto, a detecção por IQR está implementada, mas a lista de métricas está parcial. As estatísticas são calculadas em pandas; ainda falta uma consulta SQL demonstrativa com agregação por estação (`GROUP BY`).
+
+**Parte 2:** o serviço de análise (`src/services/analytics_service.py`) e a CLI ainda consultam o modelo da Parte 1 (`Cidades` e uma coluna por medição), que não existe mais no banco. Por isso a análise está fora da ingestão (`gerar_relatorio()` em `main.py`). Na fase de analytics, ela será adaptada para:
+
+- ler `Leituras` + `Leitura_Itens` + `Parametros`, por estação e parâmetro;
+- acrescentar o que o projeto final pede (item 3.4): variância, IQR como métrica, validação por **Z-Score** e um indicador de alerta de qualidade nas leituras anômalas.
+
+Só os valores fisicamente impossíveis (fora de `Parametros.valor_minimo`/`valor_maximo`) são descartados na ingestão. Os outliers estatísticos continuam no banco para serem sinalizados aqui.

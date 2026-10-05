@@ -1,89 +1,92 @@
 # Diagrama de sequência
 
+Fluxo da ingestão (`python main.py --ingestao`), como está implementado.
+
 ```mermaid
 sequenceDiagram
     autonumber
     actor Usuario as Usuário / Operador
     participant Main as main.py
+    participant Log as logger.py
     participant Config as config.py
+    participant Sec as security.py
     participant Client as data_client.py
     participant Normalizer as normalization_service.py
+    participant Param as parametro_service.py
     participant Validator as validation_service.py
     participant Repository as leitura_repository.py
-    participant DB as database.py
-    participant Analytics as analytics_service.py
-    participant Report as report_service.py
-    participant Model as models/estacao.py
-    participant Leitura as models/leitura.py
+    participant DB as Azure SQL
 
-    Usuario->>Main: run_pipeline()
+    Usuario->>Main: python main.py --ingestao
+    Main->>Log: configurar_logs()
     Main->>Config: load_config()
-    Note over Config: Lê .env, credenciais, endpoints e parâmetros do projeto.
-    Config-->>Main: settings
+    Config-->>Main: settings (FONTE_DADOS, banco, chaves)
+    Main->>Sec: configurar_seguranca(chave, pepper)
 
     Main->>Client: fetch_data()
     Client-->>Main: raw_data
 
     Main->>Normalizer: normalize(raw_data)
-    Normalizer-->>Main: normalized_data
+    Normalizer->>Sec: anonimizar_cpf(), anonimizar_nome(), criptografar_email()
+    Normalizer->>Log: registrar_rejeicao() (o que não pode ser convertido)
+    Normalizer-->>Main: normalizados (cabeçalho + itens)
 
-    Main->>Validator: validate_data(normalized_data)
-    Validator->>Model: validar_estacao()
-    Validator->>Leitura: validar_leitura()
-    Model-->>Validator: dados da estação válidos
-    Leitura-->>Validator: leitura validada
-    Validator-->>Main: registros_ok
+    Main->>Param: sincronizar(descobrir_parametros(normalizados))
+    Param->>DB: SELECT / INSERT Parametros (novos, sem faixa)
+    Param-->>Main: parâmetros aceitos (id e faixa)
+    Main->>DB: SELECT Estados (siglas)
 
-    Main->>Repository: save_readings(registros_ok)
-    Repository->>DB: connect()
-    Note over Repository,DB: DatabaseConnection.transaction() mantém uma única conexão para todo o lote.
-    DB-->>Repository: connection
-    Repository->>DB: insert_estacao()
-    Repository->>DB: insert_leituras()
-    DB-->>Repository: commit_ok
+    Main->>Validator: validate_data(normalizados)
+    Validator-->>Main: um resultado por registro
+    Main->>Log: registrar_resultados_validacao(resultados)
+
+    Main->>Repository: save_readings(registros válidos, parâmetros, fonte)
+    Repository->>DB: transaction()
+    Note over Repository,DB: Uma única conexão e transação para o lote.
+    Repository->>DB: MERGE Municipios, Operadores, Estacoes
+    Repository->>DB: #lote, #itens → DELETE partições (estação + dia) → INSERT Leituras e Leitura_Itens
+    DB-->>Repository: commit
     Note over Repository,DB: Qualquer falha faz rollback do lote inteiro.
-    Repository-->>Main: dados_persistidos
+    Repository-->>Main: contagens
 
-    Main->>Analytics: calculate_metrics()
-    Analytics->>Repository: get_readings_by_station()
-    Repository->>DB: select_leituras()
-    DB-->>Repository: registros
-    Repository-->>Analytics: dados_consultados
-    Analytics->>Analytics: media(), mediana(), desvio_padrao(), detectar_outliers()
-    Analytics-->>Main: indicadores
-
-    Main->>Report: generate_report(indicadores)
-    Report-->>Usuario: relatorio_final
+    Main->>Log: registrar_resumo(...)
+    Main-->>Usuario: resumo da ingestão
 ```
 
-## Explicação das etapas com classes e métodos
+## Explicação das etapas
 
-### 1. `main.py` -> `config.py`
-Antes de qualquer etapa, `main.py` executa `iniciar_aplicacao()`: `configurar_logs()` (`src/logger.py`), `load_config()` e `configurar_seguranca()` (`src/security.py`). Uma falha nesse ponto é registrada com nível `CRITICAL` e encerra a aplicação com código `1`. O pipeline segue em `run_pipeline()`. Esse método chama `config.py` para carregar as configurações do ambiente por meio do método `load_config()`. A responsabilidade dessa etapa é preparar a aplicação corretamente antes do processamento.
+### 1. Inicialização (`main.py` → `logger.py`, `config.py`, `security.py`)
 
-### 2. `main.py` -> `data_client.py`
-A aplicação solicita dados ao cliente da fonte externa por meio do método `fetch_data()`. Esse módulo é responsável por buscar os registros exclusivamente na API configurada em `MOCK_API` e entregar os dados brutos.
+`iniciar_aplicacao()` executa, nesta ordem, `configurar_logs()`, `load_config()` e `configurar_seguranca()`. A configuração exige `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, até 100 caracteres) e `CHAVE_CRIPTOGRAFIA`. Uma falha aqui é registrada com nível `CRITICAL` e encerra com código `1`, sem expor segredos. Sem `--ingestao`, a aplicação abre a CLI de consulta em vez da ingestão.
 
-### 3. `normalization_service.py`
+### 2. Coleta (`data_client.py`)
 
-O serviço de normalização limpa os textos, converte números e `data_hora_ciclo` e separa cada registro em cabeçalho mais uma lista de itens, um por parâmetro (`*_tipo_codigo`). Em seguida, anonimiza o operador com `src/security.py` e não copia CPF, nome e e-mail originais. O que não pode ser convertido vai para o log de rejeitados sem interromper o lote. O formato de saída está na seção 3 de [analise-implementacao.md](../analise-implementacao.md). Ele não substitui a validação: apenas prepara o registro para que ela seja executada de forma previsível.
+`fetch_data()` busca `GET {FONTE_DADOS}/api/v1/data-set` e exige uma lista de objetos.
 
-### 4. `validation_service.py` -> modelos
-Antes de validar, `main.py` chama `ParametroService.sincronizar()` com os parâmetros descobertos na normalização: os novos são cadastrados em `Parametros` sem faixa, e os que não podem ser usados (sem unidade, nome de outro código ou unidade diferente da cadastrada) são rejeitados com ERROR. Também lê as siglas de `Estados`. A validação é feita por `ValidationService.validate_data()`, com as faixas, as siglas e os parâmetros aceitos lidos do banco, antes de qualquer gravação, e não grava nem loga: devolve um resultado por registro com `valido`, `campos_nulos`, `itens_invalidos`, `motivos` e o registro só com as medições válidas (contrato na seção 4 de [analise-implementacao.md](../analise-implementacao.md)). Em seguida, `main.py` chama `registrar_resultados_validacao()` (`src/logger.py`), que grava o log de rejeitados, e envia à persistência só `ValidationService.registros_validos(resultados)`.
+### 3. Normalização e anonimização (`normalization_service.py`)
 
-### 5. `leitura_repository.py` -> `database.py`
-Após a validação, os registros são enviados ao repositório `leitura_repository.py`, que executa `save_readings()`. Esse repositório abre uma transação em `DatabaseConnection` (`src/database/connection.py`) e grava, na mesma conexão, cidades, operadores, estações (`insert_estacao()`) e leituras (`insert_leituras()`). O commit ocorre somente ao final; qualquer falha desfaz o lote inteiro. O schema não é criado pelo pipeline: ele já deve existir, criado pelo `sql/ddl_banco_relacional.sql` e mantido por `sql/migrations/`.
+Limpa os textos, converte números e datas e separa cada registro em cabeçalho mais itens, um por parâmetro (`*_tipo_codigo`). Anonimiza o operador com `src/security.py` e não copia CPF, nome e e-mail originais. O que não pode ser convertido vai para o log de rejeitados sem interromper o lote. Formato completo em [contrato-dados.md](../contrato-dados.md).
 
-### 6. `analytics_service.py`
-Depois de salvar os dados, a análise é executada pelo serviço `analytics_service.py`, por meio do método `calculate_metrics()`. Esse serviço consulta o repositório por meio de `get_readings_by_station()` e aplica operações matemáticas como `media()`, `mediana()`, `desvio_padrao()` e `detectar_outliers()`.
+### 4. Parâmetros e referências (`parametro_service.py`, `estado_repository.py`)
 
-No código, `AnaliticsService.calculate_metrics()` recebe o escopo (`cidade_id` ou `estacao_id`) e o período, e usa a mesma conexão da persistência. A consulta `get_readings_by_station()` corresponde aos métodos `get_leituras_*_by_estacao()` e `get_leituras_*_by_cidade()` de `LeituraRepository`; média, mediana e desvio padrão são calculados em `__analisar_leituras()`, e os outliers pelo IQR em `__identificar_outliers()`. O resultado consolida os grupos meteorológico e de qualidade da água.
+`ParametroService.sincronizar()` cadastra os parâmetros novos sem faixa e rejeita, com ERROR, os que não podem ser usados (sem unidade, nome de outro código ou unidade diferente da cadastrada). As siglas de `Estados` também são lidas do banco.
 
-### 7. `report_service.py`
-Por fim, a geração de relatório fica sob responsabilidade do serviço `report_service.py`, cujo método `generate_report()` recebe os indicadores calculados e devolve uma saída final para o usuário.
+### 5. Validação (`validation_service.py`) e log de rejeitados
 
-No código, `generate_report()` devolve o relatório estruturado (escopo, período, estatísticas e outliers de cada grupo), que é o retorno de `run_pipeline()`. Para exibição no console, `ReportService.format_report()` converte esse relatório em texto, que `main.py` registra no log de execução (`logs/pipeline_*.log`).
+`ValidationService.validate_data()`, com as faixas, as siglas e os parâmetros aceitos lidos do banco, devolve um resultado por registro com `valido`, `campos_nulos`, `itens_invalidos`, `motivos` e o registro só com as medições válidas. Ela não grava nem loga. `registrar_resultados_validacao()` grava o log de rejeitados a partir desses resultados, e só `ValidationService.registros_validos(resultados)` segue para a gravação.
+
+### 6. Gravação (`leitura_repository.py` → banco)
+
+`save_readings()` abre uma transação (`DatabaseConnection.transaction()`) e chama, na mesma conexão, `importar_municipios`, `importar_operadores` e `importar_estacoes` (`MERGE` pela chave natural) e `importar_leituras` → `substituir_leituras()`. Esta última carrega o lote em tabelas temporárias, apaga as leituras das partições estação + dia do lote (e as de mesmo `codigo_registro`), itens primeiro, e insere leituras e itens com operações de conjunto. O commit ocorre só ao final; qualquer falha desfaz o lote. O schema não é criado pelo pipeline: vem de `sql/ddl_banco_relacional.sql` e `sql/migrations/`.
+
+### 7. Resumo (`logger.py`)
+
+Depois do commit, `registrar_resumo()` grava no log a linha `Resumo da ingestão`, que é também o retorno de `run_pipeline()`. O Data Lake (Bronze, Silver e Gold) é tratado em outra frente do projeto.
+
+## Análise e relatório (fora da ingestão)
+
+A análise estatística (`AnaliticsService.calculate_metrics()`) e o relatório (`ReportService.generate_report()`) ficam em `gerar_relatorio()` e na CLI. Eles **ainda consultam o modelo da Parte 1**, que não existe mais no banco, e serão adaptados a `Leituras` + `Leitura_Itens` + `Parametros` na fase de analytics. Por isso não fazem parte da ingestão. Métricas previstas: [analise-estatistica.md](../analise-estatistica.md).
 
 ## Observação
 
-Este diagrama agora representa a comunicação entre as classes principais do projeto, incluindo arquivos, classes e métodos esperados. Ele deve ser mantido como referência da estrutura comportamental do sistema e atualizado sempre que o código mudar.
+Este diagrama representa a comunicação entre os módulos da ingestão e deve ser atualizado sempre que o fluxo do código mudar.
