@@ -220,7 +220,7 @@ Regras por nível:
 
 - [x] `validate_data` deixa de abortar o lote: as regras de acurácia e unicidade preenchem o mesmo resultado por registro da fase 5 (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`)
 - [x] Faixas recebidas no construtor (`ValidationService(faixas=..., siglas_estados=...)`), sem dicionário fixo no código (`NULL` = sem limite; parâmetro sem faixa = sem conferência)
-- [ ] Ler as faixas de `Parametros` e as siglas de `Estados` no banco e passá-las ao `ValidationService` → fase 8 (hoje a `run_pipeline()` valida sem faixas)
+- [x] Ler as faixas de `Parametros` e as siglas de `Estados` no banco e passá-las ao `ValidationService` (feito junto com a fase 7)
 - [x] Valor fora da faixa → rejeitar **só o item** (`etapa=acuracia`, com o valor e a faixa)
 - [x] Latitude e longitude fora da faixa → rejeitar a leitura (o CHECK do banco também barra)
 - [x] `cidade_estado` inexistente em `Estados` → rejeitar a leitura (`etapa=referencia`); sigla fora do formato → `etapa=validade`
@@ -238,13 +238,20 @@ Regras por nível:
 
 ## Fase 7 — Cadastro automático de parâmetros
 
-- [ ] Antes de gravar as leituras, comparar os parâmetros descobertos (fase 4) com `Parametros`
-- [ ] Inserir os que não existem (`codigo_parametro`, `nome`, `unidade_medida`, faixas `NULL`)
-- [ ] Logar INFO `Novo parâmetro cadastrado: <codigo> (<nome>, <unidade>)`
-- [ ] Conflito de `nome` com outro código (`UQ_Parametros_Nome`) → ERROR, parâmetro rejeitado
-- [ ] Criar `ParametroModel` e `ParametroRepository` (`get_by_codigo`, `get_all`, `create_many`)
+- [x] Antes de validar, comparar os parâmetros descobertos (fase 4) com `Parametros` (`ParametroService.sincronizar`)
+- [x] Inserir os que não existem (`codigo_parametro`, `nome` legível a partir do campo, `unidade_medida`, faixas `NULL`), sem duplicar (`INSERT ... WHERE NOT EXISTS`)
+- [x] Logar INFO `Novo parâmetro cadastrado: <codigo> (<nome>, <unidade>), sem faixa de valores.`
+- [x] Parâmetro novo sem unidade → ERROR (`etapa=parametro`), não cadastrado
+- [x] Conflito de `nome` com outro código (`UQ_Parametros_Nome`), inclusive entre dois códigos novos do mesmo lote → ERROR, parâmetro rejeitado
+- [x] Unidade do payload diferente da cadastrada (ex.: °F × °C) → ERROR, parâmetro rejeitado no lote (decisão na seção 11 da análise)
+- [x] Medições de parâmetro rejeitado são descartadas na validação (`etapa=parametro`), sem invalidar a leitura
+- [x] Criar `ParametroModel` e `ParametroRepository` (`get_all`, `get_by_codigo`, `create_many`)
+- [x] `run_pipeline()`: sincroniza os parâmetros e lê as siglas de `Estados` antes de validar, passando faixas, siglas e parâmetros aceitos ao `ValidationService` (pendência da fase 6)
 
-**Aceite:** acrescentar no dataset de teste um campo novo (ex.: `salinidade`, `salinidade_unidade_medida`, `salinidade_tipo_codigo`) cadastra 1 parâmetro e grava os itens dele; uma segunda execução não cadastra de novo.
+**Aceite:**
+
+- [x] Um campo novo (`salinidade`, `salinidade_unidade_medida`, `salinidade_tipo_codigo`) cadastra 1 parâmetro e as medições dele seguem válidas; uma segunda execução não cadastra de novo (testado)
+- [x] Com o dataset atual e o banco `impacta`: nenhum parâmetro inserido (11 antes e depois), 11 aceitos, 27 siglas lidas, mesmos números da validação das fases 5 e 6
 
 ---
 
@@ -256,7 +263,7 @@ Ordem, tudo dentro de **uma** transação (`DatabaseConnection.transaction()`):
 - [ ] Municípios: `MERGE` por `(nome, estado_id)` → cache
 - [ ] Operadores: grava os valores já protegidos na fase 4 (`nome_hash`, `cpf_hash`, `email_criptografado`); `MERGE` por `codigo_operador` → cache
 - [ ] Estações: `MERGE` por `codigo_estacao` (atualiza nome, município e coordenadas) → cache
-- [ ] Parâmetros: fase 7 → cache `codigo_parametro → id_parametro`
+- [x] Parâmetros: fase 7; o retorno de `ParametroService.sincronizar()` já traz `codigo_parametro → ParametroModel` com `id_parametro`
 - [ ] Leituras e itens, **substituição de partição**:
   1. calcular as partições do lote: pares (`estacao_id`, data de `data_hora_ciclo`)
   2. `DELETE Leitura_Itens` das leituras dessas partições

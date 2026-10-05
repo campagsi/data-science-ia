@@ -36,14 +36,18 @@ class ValidationService:
         self,
         faixas: dict[str, Faixa] | None = None,
         siglas_estados: set[str] | None = None,
+        parametros_validos: set[str] | None = None,
     ) -> None:
         """
         faixas: codigo_parametro → (valor_minimo, valor_maximo), lidas de Parametros;
             None em um dos limites = sem limite; parâmetro ausente = sem faixa.
         siglas_estados: siglas cadastradas em Estados; None = não confere.
+        parametros_validos: códigos aceitos pelo ParametroService; medição de
+            outro código é descartada; None = não confere.
         """
         self.__faixas = faixas or {}
         self.__siglas_estados = siglas_estados
+        self.__parametros_validos = parametros_validos
 
     def validate_data(self, normalizados: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Devolve um resultado por registro, na mesma ordem, sem interromper o lote."""
@@ -149,6 +153,18 @@ class ValidationService:
     def __validar_itens(self, itens: list[dict[str, Any]]) -> tuple[list, list]:
         validos, invalidos = [], []
         for item in itens:
+            if (
+                self.__parametros_validos is not None
+                and item["codigo_parametro"] not in self.__parametros_validos
+            ):
+                invalidos.append(
+                    self.__motivo(
+                        "parametro", item["campo"],
+                        "parâmetro não cadastrado (ver log do parâmetro)", item["codigo_parametro"],
+                    )
+                )
+                continue
+
             valor = item.get("valor")
             if valor is None:
                 invalidos.append(self.__motivo("completude", item["campo"], "medição nula"))

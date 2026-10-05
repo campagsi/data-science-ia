@@ -7,6 +7,8 @@ import pytest
 
 import main
 from src.config import Settings
+from src.models import EstadoModel, ParametroModel
+from src.services.parametro_service import ParametroService
 from src.services.validation_service import ValidationService
 
 
@@ -14,6 +16,10 @@ class Falha(Exception):
     pass
 
 
+PARAMETRO_PH = ParametroModel(
+    id_parametro=2, codigo_parametro="TIP-PH", nome="pH", unidade_medida="pH",
+    valor_minimo=0, valor_maximo=14,
+)
 REGISTRO_VALIDO = {"registro_codigo": "R1", "itens": [{"campo": "ph", "valor": 7.0}]}
 
 
@@ -35,7 +41,36 @@ def pipeline_falso(monkeypatch):
             chamadas.append("normalização")
             return ["normalizado"]
 
+        @staticmethod
+        def descobrir_parametros(dados):
+            return {"TIP-PH": {"campo": "ph", "unidade_medida": "pH"}}
+
+    class ParametroRepositoryFalso:
+        def __init__(self, database):
+            pass
+
+    class ParametroServiceFalso:
+        def __init__(self, repository):
+            pass
+
+        def sincronizar(self, descobertos):
+            chamadas.append(("parâmetros", sorted(descobertos)))
+            return {"TIP-PH": PARAMETRO_PH}
+
+        faixas = staticmethod(ParametroService.faixas)
+
+    class EstadoRepositoryFalso:
+        def __init__(self, database):
+            pass
+
+        def get_all(self):
+            chamadas.append("estados")
+            return [EstadoModel(sigla="RJ", nome="Rio de Janeiro")]
+
     class ValidacaoFalsa:
+        def __init__(self, **kwargs):
+            chamadas.append(("regras da validação", kwargs))
+
         def validate_data(self, dados):
             chamadas.append("validação")
             return [
@@ -77,6 +112,9 @@ def pipeline_falso(monkeypatch):
     monkeypatch.setattr(main, "NormalizationService", NormalizacaoFalsa)
     monkeypatch.setattr(main, "ValidationService", ValidacaoFalsa)
     monkeypatch.setattr(main, "DatabaseConnection", DatabaseFalso)
+    monkeypatch.setattr(main, "ParametroRepository", ParametroRepositoryFalso)
+    monkeypatch.setattr(main, "ParametroService", ParametroServiceFalso)
+    monkeypatch.setattr(main, "EstadoRepository", EstadoRepositoryFalso)
     monkeypatch.setattr(main, "LeituraRepository", LeituraRepositoryFalso)
     monkeypatch.setattr(main, "AnaliticsService", AnaliseFalsa)
     return chamadas
@@ -93,6 +131,16 @@ def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
         "configuração",
         "coleta",
         "normalização",
+        ("parâmetros", ["TIP-PH"]),
+        "estados",
+        (
+            "regras da validação",
+            {
+                "faixas": {"TIP-PH": (0.0, 14.0)},
+                "siglas_estados": {"RJ"},
+                "parametros_validos": {"TIP-PH"},
+            },
+        ),
         "validação",
         ("persistência", [REGISTRO_VALIDO]),
         ("banco da análise", "Server=teste"),
@@ -107,6 +155,8 @@ def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
         ("load_config", None),
         ("DataClient", "fetch_data"),
         ("NormalizationService", "normalize"),
+        ("ParametroService", "sincronizar"),
+        ("EstadoRepository", "get_all"),
         ("ValidationService", "validate_data"),
         ("LeituraRepository", "save_readings"),
         ("AnaliticsService", "calculate_metrics"),

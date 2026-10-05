@@ -6,10 +6,13 @@ from src.config import Settings, load_config
 from src.database.connection import DatabaseConnection
 from src.ingestion.data_client import DataClient
 from src.logger import configurar_logs, logger, registrar_resultados_validacao
+from src.repository.estado_repository import EstadoRepository
 from src.repository.leitura_repository import LeituraRepository
+from src.repository.parametro_repository import ParametroRepository
 from src.security import configurar_seguranca
 from src.services.analytics_service import AnaliticsService
 from src.services.normalization_service import NormalizationService
+from src.services.parametro_service import ParametroService
 from src.services.report_service import ReportService
 from src.services.validation_service import ValidationService
 
@@ -19,13 +22,24 @@ def run_pipeline() -> dict[str, Any]:
     settings = load_config()
     raw_data = DataClient(settings).fetch_data()
     normalized_data = NormalizationService().normalize(raw_data)
-    # Faixas de Parametros e siglas de Estados passam a vir do banco na fase 8.
-    resultados = ValidationService().validate_data(normalized_data)
-    registrar_resultados_validacao(resultados)
-    validated_data = ValidationService.registros_validos(resultados)
 
     # O schema é mantido por sql/ddl_banco_relacional.sql e sql/migrations/.
     database = DatabaseConnection(settings.azure_sql_connectionstring)
+
+    # Parâmetros novos são cadastrados antes da validação, que usa as faixas de
+    # Parametros e as siglas de Estados lidas do banco.
+    parametros = ParametroService(ParametroRepository(database)).sincronizar(
+        NormalizationService.descobrir_parametros(normalized_data)
+    )
+    siglas = {estado.sigla for estado in EstadoRepository(database).get_all()}
+    resultados = ValidationService(
+        faixas=ParametroService.faixas(parametros),
+        siglas_estados=siglas,
+        parametros_validos=set(parametros),
+    ).validate_data(normalized_data)
+    registrar_resultados_validacao(resultados)
+    validated_data = ValidationService.registros_validos(resultados)
+
     LeituraRepository(database).save_readings(validated_data)
 
     service = AnaliticsService(database)

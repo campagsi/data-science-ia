@@ -116,7 +116,7 @@ Todo campo `X_tipo_codigo` define um parâmetro `X`. Se `codigo_parametro` ainda
 - `unidade_medida` = primeiro valor encontrado entre `X_unidade_medida`, `X_medida` e `<primeiro termo de X>_unidade_medida`;
 - `valor_minimo` / `valor_maximo` = `NULL`, porque parâmetro novo não tem faixa até alguém definir.
 
-Sem unidade, não há como cadastrar (`unidade_medida NOT NULL`): o parâmetro é registrado como rejeitado com nível ERROR e os itens dele não são gravados.
+Sem unidade, não há como cadastrar (`unidade_medida NOT NULL`): o parâmetro é registrado como rejeitado com nível ERROR e os itens dele não são gravados. O mesmo vale para um nome que já pertence a outro código e para uma unidade diferente da cadastrada. Implementado em `src/services/parametro_service.py` (fase 7); o nome legível inicial vem do campo (`salinidade_total` → `Salinidade total`).
 
 ---
 
@@ -237,6 +237,7 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 | Arquivo | O que muda |
 |---|---|
 | [main.py](../main.py) | Chamada `criar_tabelas()` removida; `iniciar_aplicacao()` chama `configurar_logs()` uma vez; `print` trocado por log (fases 2 e 3). |
+| `src/services/parametro_service.py` (novo, fase 7) | `sincronizar()`: cadastra parâmetros novos sem faixa e rejeita, com ERROR, os que não podem ser usados; `faixas()` para a validação. |
 | `src/logger.py` (novo) | Configuração única de log: `configurar_logs()`, loggers `DataScienceIA_Logger` e `DataScienceIA_Rejeitados`, `registrar_rejeicao(...)`. |
 | `src/security.py` (novo) | Único ponto de anonimização e criptografia: `anonimizar_cpf`, `anonimizar_nome`, `criptografar_email`, `descriptografar_email` ([seguranca-lgpd.md](seguranca-lgpd.md)). |
 | [src/config.py](../src/config.py) | Ler `CHAVE_CRIPTOGRAFIA` (e `PEPPER_HASH`, se D8 aprovada) e falhar se ausente, sem expor o valor. |
@@ -246,9 +247,9 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 | [src/ingestion/data_client.py](../src/ingestion/data_client.py) | Adicionar tratamento de queda de conexão, resposta vazia e rate limit, com logs (padrão de `extrair_dados_api`). |
 | [src/ingestion/importar_dados.py](../src/ingestion/importar_dados.py) | Reescrita para a nova ordem: Estados (busca) → Municípios → Operadores → Estações → Parâmetros → Leituras/Itens (por partição). Os caches `__cidades`, `__operadores` e `__estacoes` passam a ser municípios, operadores, estações e parâmetros. |
 | [src/services/normalization_service.py](../src/services/normalization_service.py) | **Reescrito na fase 4:** payload novo, cabeçalho + itens, descoberta de parâmetros, anonimização e minimização, rejeição por item ou leitura sem derrubar o lote. |
-| [src/services/validation_service.py](../src/services/validation_service.py) | **Reescrito nas fases 5 e 6:** um resultado por registro (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`, `registro`; contrato na seção 4), sem abortar o lote. Faixas e siglas recebidas no construtor; a leitura delas no banco entra na fase 8. |
-| [src/models/](../src/models/) | `CidadeModel` → `MunicipioModel`; `EstadoModel` já existe; novos `ParametroModel` e `LeituraItemModel`; `LeituraModel` vira cabeçalho (`operador_id`, `estacao_id`, `data_hora`, `fonte`); `OperadorModel` e `EstacaoModel` seguem as colunas do DDL. |
-| [src/repository/](../src/repository/) | `CidadeRepository` → `MunicipioRepository`; `EstadoRepository` já existe; novos `ParametroRepository` e itens de leitura; todos os `create_many` passam a ser idempotentes (`MERGE`/partição). Há métodos com SQL montado por f-string (`create` em `leitura_repository.py` e `operador_repository.py`) que precisam sair. |
+| [src/services/validation_service.py](../src/services/validation_service.py) | **Reescrito nas fases 5 e 6:** um resultado por registro (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`, `registro`; contrato na seção 4), sem abortar o lote. Faixas, siglas e parâmetros aceitos recebidos no construtor; a `run_pipeline()` os lê do banco desde a fase 7. |
+| [src/models/](../src/models/) | `CidadeModel` → `MunicipioModel`; `EstadoModel` já existe; `ParametroModel` criado na fase 7; novo `LeituraItemModel`; `LeituraModel` vira cabeçalho (`operador_id`, `estacao_id`, `data_hora`, `fonte`); `OperadorModel` e `EstacaoModel` seguem as colunas do DDL. |
+| [src/repository/](../src/repository/) | `CidadeRepository` → `MunicipioRepository`; `EstadoRepository` já existe; `ParametroRepository` criado na fase 7; novo repositório de itens de leitura; todos os `create_many` passam a ser idempotentes (`MERGE`/partição). Há métodos com SQL montado por f-string (`create` em `leitura_repository.py` e `operador_repository.py`) que precisam sair. |
 | [src/services/analytics_service.py](../src/services/analytics_service.py), [src/cli/](../src/cli/), [src/services/report_service.py](../src/services/report_service.py) | Consultam `Cidades` e as colunas largas de `Leituras` e **vão quebrar**. Precisam ler `Leitura_Itens` + `Parametros` e pivotar no pandas. Fica fora do TODO de idempotência e entra na fase de analytics. |
 | [requirements.txt](../requirements.txt) | Adicionar `cryptography` (Fernet). O `src/cli` também usa `rich`, que não está listado. |
 | [sql/dml_populacao.sql](../sql/dml_populacao.sql) | Carga inicial: 27 estados e os 11 parâmetros conhecidos, com faixas. |
@@ -417,7 +418,23 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 
 ### Fase 7 — Cadastro automático de parâmetros
 
-- **Status:** pendente.
+- **Status:** concluída em 05/10/2026.
+- **Alterações:**
+  - `src/models/parametro_model.py` e `src/repository/parametro_repository.py` (novos). O `create_many` usa `INSERT ... WHERE NOT EXISTS`, então não duplica. `EstadoModel`, `ParametroModel`, `EstadoRepository` e `ParametroRepository` passaram a ser exportados nos `__init__.py`.
+  - `src/services/parametro_service.py` (novo): `sincronizar()`, `nome_legivel()` e `faixas()`.
+  - `src/services/validation_service.py`: novo argumento `parametros_validos`; a medição de um código fora dele vira item inválido com `etapa=parametro`.
+  - `main.py`: a `run_pipeline()` abre a conexão antes da validação, sincroniza os parâmetros, lê as siglas de `Estados` e passa faixas, siglas e parâmetros aceitos ao `ValidationService`. Isso fecha a pendência da fase 6.
+  - Testes: `tests/unit/test_parametro_service.py` (novo, com repositório em memória) e `tests/unit/test_main.py` (as duas etapas novas na ordem do pipeline e na propagação de erro).
+- **Decisões:**
+  - **Unidade diferente da cadastrada rejeita o parâmetro no lote** (ERROR), em vez de só avisar: gravar °F numa série em °C distorce médias e outliers sem ninguém perceber. A comparação ignora maiúsculas (`pH` = `PH`).
+  - O nome inicial do parâmetro novo vem do campo do payload; o time pode trocá-lo, e definir a faixa, editando o `dml_populacao.sql` e reexecutando-o.
+  - O cadastro do parâmetro novo acontece fora da transação da carga das leituras: se a carga falhar depois, o parâmetro continua cadastrado. Como é um dado de domínio e o cadastro não duplica, isso não gera inconsistência.
+- **Validações:**
+  - `pytest`: **150 passaram e 7 foram pulados**.
+  - Contra o banco `impacta`, com o dataset atual:
+    - nenhum parâmetro inserido (11 antes e 11 depois) e os 11 aceitos;
+    - 27 siglas lidas de `Estados`;
+    - a validação com faixas e siglas do banco deu os mesmos números das fases 5 e 6 (9.806 válidos, 82 inválidos, 2.681 nulos, 603 fora da faixa).
 
 ### Fase 8 — Persistência idempotente
 
