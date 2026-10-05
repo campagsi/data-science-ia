@@ -1,3 +1,4 @@
+import json
 import sys
 from datetime import date
 from typing import Any
@@ -7,6 +8,7 @@ from src.config import load_config
 from src.database.connection import DatabaseConnection
 from src.database.criar_tabelas import criar_tabelas
 from src.ingestion.data_client import DataClient
+from src.ingestion.extracao_dados import Extracao_Dados
 from src.repository.leitura_repository import LeituraRepository
 from src.services.analytics_service import AnaliticsService
 from src.services.normalization_service import NormalizationService
@@ -44,8 +46,18 @@ def _exibir_resultados(resultados: dict[str, Any]) -> None:
 if __name__ == "__main__":
     try:
         # _exibir_resultados(run_pipeline())
-        console_app = Console_APP()
-        console_app.run()
+        # console_app = Console_APP()
+        # console_app.run()
+        e = Extracao_Dados()
+        with open(
+            "C:/Users/c.de.castro.ferreira/Downloads/leituras_rj.json",
+            "r",
+            encoding="utf-8-sig",
+        ) as arquivo:
+            ar = json.load(arquivo)
+
+        e.extrair_dados_bronze("05102026", ar)
+
     except Exception as erro:
         print(f"{type(erro).__name__}: {erro}", file=sys.stderr)
         raise SystemExit(1) from erro
