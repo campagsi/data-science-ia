@@ -24,33 +24,46 @@ class EstacaoRepository:
             for linha in self.__database.fetch_all(query)
         ]
 
-    # Legado da Parte 1: consulta o modelo antigo e só é usada pela análise
-    # (src/services/analytics_service.py), que será adaptada ao modelo 3FN.
-    def get_estacao_cidade(self, cidadeId: int):
-        query = "SELECT id, codigo, nome, cidade_id, operador_id, latitude, longitude, ativa, tipo FROM estacoes WHERE cidade_id = ?"
-
-        result = self.__database.fetch_all(
-            query,
-            (cidadeId,),
-        )
-
-        if not result:
-            return None
-
+    def get_by_municipio(self, municipio_id: int) -> list[EstacaoModel]:
+        """Estações de um município, em ordem de nome."""
+        query = """
+            SELECT id_estacao, codigo_estacao, nome, municipio_id, latitude, longitude
+            FROM dbo.Estacoes
+            WHERE municipio_id = ?
+            ORDER BY nome
+        """
         return [
-            {
-                "id": linha[0],
-                "codigo": linha[1],
-                "nome": linha[2],
-                "cidade_id": linha[3],
-                "operador_id": linha[4],
-                "latitude": linha[5],
-                "longitude": linha[6],
-                "ativa": linha[7],
-                "tipo": linha[8],
-            }
-            for linha in result
+            EstacaoModel(
+                id_estacao=linha[0],
+                codigo_estacao=linha[1],
+                nome=linha[2],
+                municipio_id=linha[3],
+                latitude=float(linha[4]),
+                longitude=float(linha[5]),
+            )
+            for linha in self.__database.fetch_all(query, (municipio_id,))
         ]
+
+    def get_by_codigo(self, codigo_estacao: str) -> EstacaoModel | None:
+        """Estação pela chave natural, ou None se não existir."""
+        linha = self.__database.fetch_one(
+            """
+            SELECT id_estacao, codigo_estacao, nome, municipio_id, latitude, longitude
+            FROM dbo.Estacoes
+            WHERE codigo_estacao = ?
+            """,
+            (codigo_estacao,),
+        )
+        if not linha:
+            return None
+        return EstacaoModel(
+            id_estacao=linha[0],
+            codigo_estacao=linha[1],
+            nome=linha[2],
+            municipio_id=linha[3],
+            latitude=float(linha[4]),
+            longitude=float(linha[5]),
+        )
 
     def merge_many(self, estacoes: list[EstacaoModel]) -> int:
         """

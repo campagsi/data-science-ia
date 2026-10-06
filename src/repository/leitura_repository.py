@@ -10,32 +10,42 @@ class LeituraRepository:
     def __init__(self, database: DatabaseConnection | None = None) -> None:
         self.__database = database or DatabaseConnection()
 
-    # Consultas legadas da Parte 1 (modelo antigo, uma coluna por medição).
-    # Só a análise (src/services/analytics_service.py) as usa; serão adaptadas
-    # ao modelo Leituras + Leitura_Itens + Parametros na fase de analytics.
-    def get_leituras_meteorologicas_by_cidade(
+    def get_medicoes(
         self,
-        cidade_id: int,
+        estacao_id: int | None = None,
+        municipio_id: int | None = None,
         data_inicio: date | None = None,
         data_fim: date | None = None,
-    ):
+        codigos_parametro: list[str] | None = None,
+    ) -> list[dict]:
+        """
+        Medições gravadas, uma linha por item (Leituras + Leitura_Itens + Parametros).
 
+        Filtros opcionais: estação, município, parâmetros e período. Só
+        data_inicio = aquele dia; data_inicio e data_fim = intervalo fechado.
+        Ordenadas por estação, parâmetro e data/hora.
+        """
         query = """
-                SELECT
-                L.temperatura, 
-                L.pressao,
-                L.umidade,
-                L.precipitacao,
-                L.velocidade_vento,
-                L.radiacao_solar,
-                L.data_hora,
-                E.nome
-                FROM Leituras L
-                INNER JOIN Estacoes E ON L.estacao_id = E.id
-                WHERE E.cidade_id = ?               
-            """
+            SELECT
+                E.id_estacao, E.codigo_estacao, E.nome,
+                L.codigo_registro, L.data_hora,
+                P.codigo_parametro, P.nome, P.unidade_medida,
+                I.valor
+            FROM dbo.Leitura_Itens AS I
+            INNER JOIN dbo.Leituras AS L ON L.id_leitura = I.leitura_id
+            INNER JOIN dbo.Parametros AS P ON P.id_parametro = I.parametro_id
+            INNER JOIN dbo.Estacoes AS E ON E.id_estacao = L.estacao_id
+            WHERE 1 = 1
+        """
+        params: list = []
 
-        params = [cidade_id]
+        if estacao_id is not None:
+            query += " AND L.estacao_id = ?"
+            params.append(estacao_id)
+
+        if municipio_id is not None:
+            query += " AND E.municipio_id = ?"
+            params.append(municipio_id)
 
         if data_inicio is not None and data_fim is None:
             query += " AND CAST(L.data_hora AS DATE) = ?"
@@ -45,166 +55,25 @@ class LeituraRepository:
             query += " AND CAST(L.data_hora AS DATE) BETWEEN ? AND ?"
             params.extend([data_inicio, data_fim])
 
-        result = self.__database.fetch_all(query, params)
+        if codigos_parametro:
+            query += f" AND P.codigo_parametro IN ({', '.join('?' * len(codigos_parametro))})"
+            params.extend(codigos_parametro)
 
-        if not result:
-            return None
-
-        return [
-            {
-                "temperatura": linha[0],
-                "pressao": linha[1],
-                "umidade": linha[2],
-                "precipitacao": linha[3],
-                "velocidade_vento": linha[4],
-                "radiacao_solar": linha[5],
-                "data_hora": linha[6],
-                "estacao": linha[7],
-            }
-            for linha in result
-        ]
-
-    def get_leituras_qualidade_agua_by_cidade(
-        self,
-        estacao_id: int,
-        data_inicio: date | None = None,
-        data_fim: date | None = None,
-    ):
-
-        query = """
-                            SELECT
-                            L.temperatura_agua,
-                            L.ph,
-                            L.oxigenio_dissolvido,
-                            L.condutividade,
-                            L.turbidez,
-                            L.data_hora,
-                            E.nome
-                            FROM Leituras L
-                            INNER JOIN Estacoes E ON L.estacao_id = E.id
-                            WHERE E.cidade_id = ?               
-                        """
-
-        params = [estacao_id]
-
-        if data_inicio is not None and data_fim is None:
-            query += " AND CAST(L.data_hora AS DATE) = ?"
-            params.append(data_inicio)
-
-        if data_inicio is not None and data_fim is not None:
-            query += " AND CAST(L.data_hora AS DATE) BETWEEN ? AND ?"
-            params.extend([data_inicio, data_fim])
-
-        result = self.__database.fetch_all(query, params)
-
-        if not result:
-            return None
+        query += " ORDER BY E.codigo_estacao, P.codigo_parametro, L.data_hora"
 
         return [
             {
-                "temperatura_agua": linha[0],
-                "ph": linha[1],
-                "oxigenio_dissolvido": linha[2],
-                "condutividade": linha[3],
-                "turbidez": linha[4],
-                "data_hora": linha[5],
-                "estacao": linha[6],
+                "estacao_id": linha[0],
+                "estacao_codigo": linha[1],
+                "estacao": linha[2],
+                "codigo_registro": linha[3],
+                "data_hora": linha[4],
+                "codigo_parametro": linha[5],
+                "parametro": linha[6],
+                "unidade_medida": linha[7],
+                "valor": float(linha[8]),
             }
-            for linha in result
-        ]
-
-    def get_leituras_meteorologicas_by_estacao(
-        self,
-        estacao_id: int,
-        data_inicio: date | None = None,
-        data_fim: date | None = None,
-    ):
-
-        query = """
-                    SELECT
-                    L.temperatura, 
-                    L.pressao,
-                    L.umidade,
-                    L.precipitacao,
-                    L.velocidade_vento,
-                    L.radiacao_solar,
-                    L.data_hora
-                    FROM Leituras L
-                    WHERE L.estacao_id = ?               
-                """
-
-        params = [estacao_id]
-
-        if data_inicio is not None and data_fim is None:
-            query += " AND CAST(L.data_hora AS DATE) = ?"
-            params.append(data_inicio)
-
-        if data_inicio is not None and data_fim is not None:
-            query += " AND CAST(L.data_hora AS DATE) BETWEEN ? AND ?"
-            params.extend([data_inicio, data_fim])
-
-        result = self.__database.fetch_all(query, params)
-
-        if not result:
-            return None
-
-        return [
-            {
-                "temperatura": linha[0],
-                "pressao": linha[1],
-                "umidade": linha[2],
-                "precipitacao": linha[3],
-                "velocidade_vento": linha[4],
-                "radiacao_solar": linha[5],
-                "data_hora": linha[6],
-            }
-            for linha in result
-        ]
-
-    def get_leituras_qualidade_agua_by_estacao(
-        self,
-        estacao_id: int,
-        data_inicio: date | None = None,
-        data_fim: date | None = None,
-    ):
-
-        query = """
-                    SELECT
-                    L.temperatura_agua,
-                    L.ph,
-                    L.oxigenio_dissolvido,
-                    L.condutividade,
-                    L.turbidez,
-                    L.data_hora
-                    FROM Leituras as L
-                    WHERE estacao_id = ?               
-                """
-
-        params = [estacao_id]
-
-        if data_inicio is not None and data_fim is None:
-            query += " AND CAST(L.data_hora AS DATE) = ?"
-            params.append(data_inicio)
-
-        if data_inicio is not None and data_fim is not None:
-            query += " AND CAST(L.data_hora AS DATE) BETWEEN ? AND ?"
-            params.extend([data_inicio, data_fim])
-
-        result = self.__database.fetch_all(query, params)
-
-        if not result:
-            return None
-
-        return [
-            {
-                "temperatura_agua": linha[0],
-                "ph": linha[1],
-                "oxigenio_dissolvido": linha[2],
-                "condutividade": linha[3],
-                "turbidez": linha[4],
-                "data_hora": linha[5],
-            }
-            for linha in result
+            for linha in self.__database.fetch_all(query, params)
         ]
 
     def substituir_leituras(

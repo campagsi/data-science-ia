@@ -42,7 +42,7 @@ Modelos Pydantic em `src/models/`, um por tabela do modelo 3FN ([modelagem-banco
 
 `EstadoModel`, `MunicipioModel`, `EstacaoModel`, `OperadorModel` (só dados anonimizados), `ParametroModel`, `LeituraModel` (cabeçalho) e `LeituraItemModel` (medição).
 
-Os tamanhos e as faixas dos campos seguem o DDL, então um valor que o banco recusaria é barrado antes da gravação. `CidadeModel` continua no código só para a análise legada.
+Os tamanhos e as faixas dos campos seguem o DDL, então um valor que o banco recusaria é barrado antes da gravação.
 
 ## 3. Camada de serviços
 
@@ -52,7 +52,9 @@ Os tamanhos e as faixas dos campos seguem o DDL, então um valor que o banco rec
 | `src/services/normalization_service.py` | Converte o payload para cabeçalho + itens, descobre os parâmetros pelos campos `*_tipo_codigo` e anonimiza o operador. O que não pode ser convertido vai para o log, sem parar o lote. |
 | `src/services/parametro_service.py` | Cadastra parâmetros novos sem faixa e rejeita os que não podem ser usados. |
 | `src/services/validation_service.py` | Valida antes de gravar e devolve **um resultado por registro** (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`). Não grava nem loga. |
-| `src/services/analytics_service.py`, `report_service.py` | Estatística, outliers e relatório. Ainda leem o modelo da Parte 1 e serão adaptados na fase de analytics. |
+| `src/services/analytics_service.py` | Estatística por estação + parâmetro (média, mediana, desvio, variância, quartis, IQR) e anomalias por IQR ou Z-Score com indicador de alerta ([analise-estatistica.md](analise-estatistica.md)). |
+| `src/services/report_service.py` | Relatório estruturado, texto para o log/console e CSV. |
+| `src/cli/` | Consulta interativa (rich): município → estação → período → métricas e anomalias. |
 
 Os contratos de entrada e saída de cada serviço estão em [contrato-dados.md](contrato-dados.md).
 
@@ -72,8 +74,8 @@ Os repositórios recebem a `DatabaseConnection` que devem usar. Assim, `save_rea
 `main.py` coordena o fluxo:
 
 - `iniciar_aplicacao()`: logs → configuração → segurança;
-- `run_pipeline()`: coleta → normalização → parâmetros → validação → log de rejeitados → gravação no banco → resumo (`python main.py --ingestao`). O Data Lake (Bronze, Silver e Gold) é tratado em outra frente do projeto.
-- `gerar_relatorio()`: análise e relatório da Parte 1, fora da ingestão até a fase de analytics;
+- `run_pipeline()`: coleta → normalização → parâmetros → validação → log de rejeitados → gravação no banco → resumo (`python main.py --ingestao`). O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
+- `gerar_relatorio()`: análise estatística das medições gravadas, relatório em `INFO` e cada anomalia em `WARNING` (`python main.py --analise [--estacao] [--inicio] [--fim]`);
 - sem argumentos, `main.py` abre a CLI de consulta (`src/cli`).
 
 A sequência detalhada está em [diagramas/diagrama-sequencia.md](diagramas/diagrama-sequencia.md).

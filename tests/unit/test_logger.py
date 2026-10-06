@@ -35,6 +35,19 @@ def test_configurar_logs_cria_os_dois_arquivos(arquivos, tmp_path):
     assert arquivos["rejeitados"].exists()
 
 
+def test_pasta_logs_do_ambiente_substitui_a_padrao(monkeypatch, tmp_path):
+    monkeypatch.setenv("PASTA_LOGS", str(tmp_path / "ambiente"))
+    caminhos = log.configurar_logs()
+    try:
+        assert caminhos["pipeline"].parent == tmp_path / "ambiente"
+        assert caminhos["pipeline"].parent != log.PASTA_LOGS
+    finally:
+        for alvo in (log.logger_rejeitados, logging.getLogger()):
+            for handler in list(alvo.handlers):
+                handler.close()
+                alvo.removeHandler(handler)
+
+
 def test_log_da_execucao_segue_o_formato(arquivos):
     log.logger.info("Iniciando ingestão")
 

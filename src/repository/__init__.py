@@ -1,4 +1,3 @@
-from .cidade_repository import CidadeRepository
 from .estacao_repository import EstacaoRepository
 from .leitura_repository import LeituraRepository
 from .operador_repository import OperadorRepository

@@ -57,7 +57,7 @@ sequenceDiagram
 
 ### 1. Inicialização (`main.py` → `logger.py`, `config.py`, `security.py`)
 
-`iniciar_aplicacao()` executa, nesta ordem, `configurar_logs()`, `load_config()` e `configurar_seguranca()`. A configuração exige `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, até 100 caracteres) e `CHAVE_CRIPTOGRAFIA`. Uma falha aqui é registrada com nível `CRITICAL` e encerra com código `1`, sem expor segredos. Sem `--ingestao`, a aplicação abre a CLI de consulta em vez da ingestão.
+`iniciar_aplicacao()` executa, nesta ordem, `configurar_logs()`, `load_config()` e `configurar_seguranca()`. A configuração exige `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, até 100 caracteres) e `CHAVE_CRIPTOGRAFIA`. Uma falha aqui é registrada com nível `CRITICAL` e encerra com código `1`, sem expor segredos. Com `--analise`, executa a análise (seção abaixo); sem argumentos, abre a CLI de consulta.
 
 ### 2. Coleta (`data_client.py`)
 
@@ -81,11 +81,35 @@ Limpa os textos, converte números e datas e separa cada registro em cabeçalho 
 
 ### 7. Resumo (`logger.py`)
 
-Depois do commit, `registrar_resumo()` grava no log a linha `Resumo da ingestão`, que é também o retorno de `run_pipeline()`. O Data Lake (Bronze, Silver e Gold) é tratado em outra frente do projeto.
+Depois do commit, `registrar_resumo()` grava no log a linha `Resumo da ingestão`, que é também o retorno de `run_pipeline()`. O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
 
-## Análise e relatório (fora da ingestão)
+## Análise e relatório (`python main.py --analise`)
 
-A análise estatística (`AnaliticsService.calculate_metrics()`) e o relatório (`ReportService.generate_report()`) ficam em `gerar_relatorio()` e na CLI. Eles **ainda consultam o modelo da Parte 1**, que não existe mais no banco, e serão adaptados a `Leituras` + `Leitura_Itens` + `Parametros` na fase de analytics. Por isso não fazem parte da ingestão. Métricas previstas: [analise-estatistica.md](../analise-estatistica.md).
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Usuario as Usuário / Operador
+    participant Main as main.py
+    participant Analise as analytics_service.py
+    participant Repo as leitura_repository.py
+    participant Report as report_service.py
+    participant Log as logger.py
+    participant DB as Azure SQL
+
+    Usuario->>Main: python main.py --analise [--estacao] [--inicio] [--fim]
+    Main->>Analise: buscar_estacao_por_codigo(codigo)
+    Main->>Analise: calculate_metrics(estacao_id, data_inicio, data_fim)
+    Analise->>Repo: get_medicoes(filtros)
+    Repo->>DB: SELECT Leitura_Itens + Leituras + Parametros + Estacoes
+    DB-->>Repo: uma linha por medição
+    Analise->>Analise: analisar_medicoes(): métricas por estação + parâmetro, IQR, Z-Score, alerta
+    Analise-->>Main: estatisticas, anomalias
+    Main->>Report: generate_report(), format_report()
+    Main->>Log: relatório em INFO
+    Main->>Log: registrar_anomalias(): uma linha WARNING por anomalia
+```
+
+A análise não grava nada no banco: o indicador de alerta fica no resultado, no log e no CSV da CLI (decisão D9). A CLI usa o mesmo `calculate_metrics()`, com a estação e o período escolhidos no menu. Regras: [analise-estatistica.md](../analise-estatistica.md).
 
 ## Observação
 

@@ -2,12 +2,13 @@
 import os
 import subprocess
 import sys
+from datetime import date, datetime
 
 import pytest
 
 import main
 from src.config import Settings
-from src.models import EstadoModel, ParametroModel
+from src.models import EstacaoModel, EstadoModel, ParametroModel
 from src.services.parametro_service import ParametroService
 from src.services.validation_service import ValidationService
 
@@ -21,6 +22,14 @@ PARAMETRO_PH = ParametroModel(
     valor_minimo=0, valor_maximo=14,
 )
 REGISTRO_VALIDO = {"registro_codigo": "R1", "itens": [{"campo": "ph", "valor": 7.0}]}
+ESTACAO = EstacaoModel(
+    id_estacao=5, codigo_estacao="EST-RJ-001", nome="Estação", municipio_id=1, latitude=-22.9, longitude=-43.2,
+)
+ANOMALIA = {
+    "Estação": "Estação", "Parâmetro": "pH", "Unidade": "pH", "Data": datetime(2026, 6, 1, 3),
+    "Registro": "R1", "Valor": 13.5, "Limite Inferior": 6.0, "Limite Superior": 8.5,
+    "Z-Score": 4.2, "Alerta": "IQR+ZSCORE",
+}
 
 
 @pytest.fixture
@@ -101,9 +110,13 @@ def pipeline_falso(monkeypatch):
         def __init__(self, database):
             chamadas.append(("banco da análise", database.connection_string))
 
+        def buscar_estacao_por_codigo(self, codigo):
+            chamadas.append(("estação", codigo))
+            return ESTACAO if codigo == ESTACAO.codigo_estacao else None
+
         def calculate_metrics(self, **kwargs):
-            chamadas.append("análise")
-            return {"escopo": {"cidade_id": kwargs["cidade_id"]}}
+            chamadas.append(("análise", kwargs))
+            return {"escopo": {"estacao_id": kwargs["estacao_id"]}, "anomalias": [ANOMALIA]}
 
     def carregar_config():
         chamadas.append("configuração")
@@ -158,17 +171,70 @@ def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
     }
 
 
-def test_run_pipeline_nao_executa_a_analise_legada(pipeline_falso):
+def test_run_pipeline_nao_executa_a_analise(pipeline_falso):
     main.run_pipeline()
 
-    assert "análise" not in pipeline_falso
+    assert not any(isinstance(c, tuple) and c[0] == "banco da análise" for c in pipeline_falso)
 
 
-def test_gerar_relatorio_usa_a_analise_e_o_relatorio(pipeline_falso):
-    relatorio = main.gerar_relatorio(main.DatabaseConnection("Server=teste"))
+def test_gerar_relatorio_resolve_a_estacao_e_repassa_o_periodo(pipeline_falso, logs_temporarios):
+    relatorio = main.gerar_relatorio(
+        main.DatabaseConnection("Server=teste"), "EST-RJ-001", date(2026, 6, 1), date(2026, 6, 30)
+    )
 
-    assert pipeline_falso == [("banco da análise", "Server=teste"), "análise"]
-    assert relatorio == {"escopo": {"cidade_id": 1}, "periodo": {}, "grupos": {}}
+    assert pipeline_falso == [
+        ("banco da análise", "Server=teste"),
+        ("estação", "EST-RJ-001"),
+        ("análise", {"estacao_id": 5, "data_inicio": date(2026, 6, 1), "data_fim": date(2026, 6, 30)}),
+    ]
+    assert relatorio["escopo"] == {"estacao_id": 5}
+    assert relatorio["anomalias"] == [ANOMALIA]
+
+
+def test_gerar_relatorio_registra_cada_anomalia_em_warning(pipeline_falso, logs_temporarios):
+    main.gerar_relatorio(main.DatabaseConnection("Server=teste"))
+
+    alertas = [linha for linha in logs_temporarios("pipeline") if "Alerta de qualidade" in linha]
+    assert len(alertas) == 1
+    assert "[WARNING]" in alertas[0]
+    assert "alerta=IQR+ZSCORE" in alertas[0] and "registro=R1" in alertas[0] and "zscore=4.20" in alertas[0]
+
+
+def test_gerar_relatorio_com_estacao_inexistente_falha(pipeline_falso):
+    with pytest.raises(ValueError, match="Estação não cadastrada: X"):
+        main.gerar_relatorio(main.DatabaseConnection("Server=teste"), "X")
+
+
+@pytest.mark.parametrize(
+    ("argv", "esperado"),
+    [
+        ([], {"ingestao": False, "analise": False, "estacao": None, "inicio": None, "fim": None}),
+        (["--ingestao"], {"ingestao": True, "analise": False, "estacao": None, "inicio": None, "fim": None}),
+        (
+            ["--analise", "--estacao", "EST-1", "--inicio", "2026-06-01", "--fim", "2026-06-30"],
+            {"ingestao": False, "analise": True, "estacao": "EST-1",
+             "inicio": date(2026, 6, 1), "fim": date(2026, 6, 30)},
+        ),
+    ],
+)
+def test_ler_argumentos(argv, esperado):
+    assert vars(main.ler_argumentos(argv)) == esperado
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--ingestao", "--analise"],
+        ["--ingestao", "--estacao", "EST-1"],
+        ["--analise", "--fim", "2026-06-30"],
+        ["--analise", "--inicio", "2026-07-01", "--fim", "2026-06-30"],
+        ["--analise", "--inicio", "01/06/2026"],
+    ],
+)
+def test_argumentos_invalidos_encerram_com_erro(argv):
+    with pytest.raises(SystemExit) as erro:
+        main.ler_argumentos(argv)
+    assert erro.value.code == 2
 
 
 @pytest.mark.parametrize(
@@ -202,8 +268,7 @@ def test_falha_interrompe_as_etapas_seguintes(pipeline_falso, monkeypatch):
     with pytest.raises(Falha):
         main.run_pipeline()
 
-    assert not any(c[0] == "persistência" for c in pipeline_falso if isinstance(c, tuple))
-    assert "análise" not in pipeline_falso
+    assert not any(c[0] in {"persistência", "banco da análise"} for c in pipeline_falso if isinstance(c, tuple))
 
 
 def test_execucao_com_falha_termina_com_codigo_1_sem_expor_segredo(tmp_path):

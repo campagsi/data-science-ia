@@ -1,9 +1,12 @@
 from rich.console import Console
 from rich.panel import Panel
 
+# Primeiro menu da CLI: não tem para onde voltar.
+MENU_INICIAL = "Municípios"
 
-def exibir_painel(dados: dict, menu: str):
-    console = Console()
+
+def exibir_painel(dados: dict, menu: str, console: Console | None = None):
+    console = console or Console()
 
     if not dados:
         console.print(
@@ -12,16 +15,15 @@ def exibir_painel(dados: dict, menu: str):
         return
 
     itens_menu = "\n".join(
-        f"{numero} - {item['nome']}" for numero, item in dados.items()
+        f"{numero} - {item['nome']}" + (f" ({item['sigla']})" if item.get("sigla") else "")
+        for numero, item in dados.items()
     )
-    console.clear()
-    console.line(2)
     menu_title = f"Lista de {menu}" if menu else ""
     console.print(Panel(itens_menu, title=menu_title, style="bold cyan", expand=False))
 
     msg_acoes = "[italic yellow]Digite 's' para sair.[/]"
 
-    if menu != "Cidades":
+    if menu != MENU_INICIAL:
         msg_acoes += "[italic yellow] ou 'v' para voltar.[/]"
 
     console.print(msg_acoes)

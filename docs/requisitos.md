@@ -99,7 +99,7 @@ Critérios:
 - recuperar dados por identificador da estação;
 - demonstrar agregações SQL por estação e consultas com `JOIN`.
 
-Consulta por cidade e operador é extensão do modelo atual, não requisito original.
+Consulta por município é extensão (usada pela CLI); por operador não está implementada. Implementado na Parte 2: `LeituraRepository.get_medicoes()` (filtros por estação, município, parâmetro e período) e [sql/queries_analiticas.sql](../sql/queries_analiticas.sql) (agregações com `GROUP BY` e `JOIN` por estação e parâmetro).
 
 ### RF07 - Cálculo estatístico
 O sistema deve calcular métricas estatísticas a partir dos dados persistidos.
@@ -109,6 +109,8 @@ Critérios:
 - identificar variações relevantes;
 - calcular por parâmetro ambiental, com contexto de estação e período.
 
+Implementado na Parte 2 por estação + parâmetro, com variância (item 3.4 do projeto final) ([analise-estatistica.md](analise-estatistica.md)).
+
 ### RF08 - Identificação de outliers
 O sistema deve identificar registros que estejam fora do padrão esperado.
 
@@ -116,6 +118,8 @@ Critérios:
 - aplicar regras estatísticas sobre os dados;
 - distinguir valores inconsistentes de valores normais;
 - registrar os registros considerados atípicos.
+
+Implementado na Parte 2: regra IQR ou \|Z\| > 3, indicador de alerta de qualidade em cada medição anômala e uma linha `WARNING` por anomalia no log. Os outliers são sinalizados, não removidos.
 
 ### RF09 - Geração de relatório
 O sistema deve apresentar no terminal ou em relatório textual os principais indicadores e resultados da análise.
@@ -166,7 +170,7 @@ As regras de integridade abaixo detalham o modelo relacional adotado. A idempot�
 3. Campos como temperatura, umidade, pressão, pH, oxigênio dissolvido, condutividade e turbidez devem ser validados antes da persistência.
 4. Registros incompletos ou inválidos não devem ser armazenados sem tratamento.
 5. Dados sensíveis devem ser removidos ou mascarados antes do armazenamento.
-6. A análise deve considerar o contexto da estação e do período; agrupamento por cidade é uma extensão.
+6. A análise deve considerar o contexto da estação e do período; filtro por município é uma extensão.
 7. O sistema deve registrar falhas para facilitar manutenção e correção.
 8. O processamento repetido do mesmo registro (`codigo_registro`) ou do mesmo período não deve criar uma nova leitura: as leituras de cada estação + dia do lote são substituídas.
 

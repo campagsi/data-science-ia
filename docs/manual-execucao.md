@@ -68,7 +68,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 Use a mesma `CHAVE_CRIPTOGRAFIA` e o mesmo `PEPPER_HASH` em todas as máquinas (ver [seguranca-lgpd.md](seguranca-lgpd.md)).
 
-Os logs de cada execução ficam em `logs/` (fora do Git): `pipeline_AAAAMMDD_HHMMSS.log` com a execução e `rejeitados_AAAAMMDD_HHMMSS.log` com tudo o que não foi importado.
+Os logs de cada execução ficam em `logs/` (fora do Git): `pipeline_AAAAMMDD_HHMMSS.log` com a execução e `rejeitados_AAAAMMDD_HHMMSS.log` com tudo o que não foi importado. A variável de ambiente opcional `PASTA_LOGS` troca essa pasta; os testes a apontam para uma pasta temporária, para que `logs/` guarde só os logs de cargas reais.
 
 Nao use `DB_HOST`, `DB_PORT`, `DB_USER` ou `DB_PASSWORD`: essas variaveis pertencem a uma configuracao PostgreSQL e nao sao lidas pelo codigo atual.
 
@@ -80,7 +80,7 @@ O schema da Parte 2 (modelo 3FN) é mantido **somente** pelos scripts SQL da pas
 |---|---|
 | [sql/ddl_banco_relacional.sql](../sql/ddl_banco_relacional.sql) | Estado **completo e atual** do schema: tabelas, chaves e índices. Usado para criar um banco do zero. **Começa com `DROP TABLE IF EXISTS`: apaga todas as tabelas e dados.** |
 | [sql/migrations/](../sql/migrations/) | Alterações incrementais (`VNNN__descricao.sql`) para levar um banco **já existente** ao estado do DDL, sem perder dados. |
-| [sql/dml_populacao.sql](../sql/dml_populacao.sql) | Carga inicial de estados e parâmetros (fase 3 do [TODO](todo-idempotencia.md); ainda vazio). |
+| [sql/dml_populacao.sql](../sql/dml_populacao.sql) | Carga inicial de estados e parâmetros (fase 3 do [TODO](todo-idempotencia.md); idempotente, com `MERGE`). |
 
 ### Banco novo (vazio)
 
@@ -171,11 +171,27 @@ A ingestão:
 3. valida;
 4. grava no banco, numa única transação.
 
-O Data Lake (Bronze, Silver e Gold) é tratado em outra frente do projeto.
+O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
 
 A carga é **idempotente**: reexecutar o mesmo período substitui as leituras de cada estação + dia, sem duplicar. Ao final, o log registra uma linha `Resumo da ingestão` com recebidos, válidos, inválidos, itens descartados, leituras gravadas e substituídas e itens gravados.
 
-O pipeline consulta exclusivamente a API configurada em `FONTE_DADOS`. A interface de consulta e a análise estatística ainda leem o modelo antigo e serão adaptadas ao modelo 3FN na fase de analytics.
+O pipeline consulta exclusivamente a API configurada em `FONTE_DADOS`.
+
+### Análise estatística
+
+Depois de uma carga, sem precisar da API:
+
+```bash
+python main.py --analise                                      # todas as estações, todo o período
+python main.py --analise --estacao EST-RJ-001                 # uma estação
+python main.py --analise --inicio 2026-06-01 --fim 2026-06-30 # intervalo (só --inicio = um dia)
+```
+
+O relatório (métricas por estação e parâmetro) vai para o log da execução em `INFO`, e cada medição anômala vai numa linha `WARNING` com o indicador de alerta (`IQR`, `ZSCORE` ou `IQR+ZSCORE`). Estação inexistente encerra com `CRITICAL` e código `1`. As mesmas métricas podem ser conferidas direto no banco com [sql/queries_analiticas.sql](../sql/queries_analiticas.sql). Regras em [analise-estatistica.md](analise-estatistica.md).
+
+### Interface de consulta
+
+`python main.py` sem argumentos abre a CLI: escolha o município, a estação e o período (datas em `dd/mm/aaaa`). A tela mostra as métricas de todos os parâmetros e as anomalias; a opção `0` salva `estatisticas.csv` e `anomalias.csv` em `relatorios/` (fora do Git).
 
 ## 7. Verificar resultados
 
@@ -213,7 +229,7 @@ python -m pytest tests
 python -m pytest tests/unit/test_security.py tests/unit/test_logger.py
 ```
 
-Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (resultado esperado: `152 passed, 7 skipped`). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
+Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (resultado esperado: `183 passed, 18 skipped`). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
 
 ## Estrutura executada
 

@@ -6,6 +6,7 @@ com logging.getLogger(NOME_LOGGER). As regras estão em docs/seguranca-lgpd.md.
 """
 
 import logging
+import os
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -33,14 +34,16 @@ logger_rejeitados = logging.getLogger(NOME_LOGGER_REJEITADOS)
 __rejeicoes: Counter = Counter()
 
 
-def configurar_logs(pasta: Path = PASTA_LOGS) -> dict[str, Path]:
+def configurar_logs(pasta: Path | None = None) -> dict[str, Path]:
     """
     Configura o log da execução (console + arquivo) e o log de rejeitados.
 
-    Deve ser chamada uma única vez, no início do main.py. Retorna o caminho
-    dos dois arquivos criados.
+    Deve ser chamada uma única vez, no início do main.py. A pasta padrão é
+    logs/ na raiz do projeto; a variável de ambiente PASTA_LOGS a substitui
+    (usada pelos testes para não misturar seus arquivos com os de cargas reais).
+    Retorna o caminho dos dois arquivos criados.
     """
-    pasta = Path(pasta)
+    pasta = Path(pasta or os.environ.get("PASTA_LOGS") or PASTA_LOGS)
     pasta.mkdir(parents=True, exist_ok=True)
 
     carimbo = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -147,3 +150,22 @@ def registrar_resumo(**contagens: int) -> None:
     """Registra a linha INFO de resumo da execução."""
     texto = " ".join(f"{nome}={valor}" for nome, valor in contagens.items())
     logger.info(f"Resumo da ingestão: {texto}")
+
+
+def registrar_anomalias(anomalias: list[dict]) -> None:
+    """
+    Registra em WARNING, no log da execução, cada medição sinalizada pela
+    análise (AnaliticsService): é a evidência da detecção de outliers.
+    """
+    for anomalia in anomalias:
+        limites = (
+            f"[{anomalia['Limite Inferior']:.4g}, {anomalia['Limite Superior']:.4g}]"
+            if anomalia["Limite Inferior"] is not None
+            else "[sem IQR]"
+        )
+        zscore = f"{anomalia['Z-Score']:.2f}" if anomalia["Z-Score"] is not None else "indefinido"
+        logger.warning(
+            f"Alerta de qualidade: alerta={anomalia['Alerta']} estacao=\"{anomalia['Estação']}\" "
+            f"registro={anomalia['Registro']} parametro=\"{anomalia['Parâmetro']}\" "
+            f"data_hora={anomalia['Data']} valor={anomalia['Valor']} limites_iqr={limites} zscore={zscore}"
+        )

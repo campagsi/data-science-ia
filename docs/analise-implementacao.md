@@ -238,10 +238,10 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 
 | Arquivo | O que muda |
 |---|---|
-| [main.py](../main.py) | Chamada `criar_tabelas()` removida; `iniciar_aplicacao()` chama `configurar_logs()` uma vez; `print` trocado por log (fases 2 e 3). Na fase 8, `run_pipeline()` passou a fazer só a ingestão (com resumo), a análise foi para `gerar_relatorio()` e foi criado o comando `python main.py --ingestao`. |
-| `src/ingestion/bronze_writer.py` | Criado na fase 8 e **removido em 05/10/2026**: o Data Lake é tratado em outra frente do projeto. |
+| [main.py](../main.py) | Chamada `criar_tabelas()` removida; `iniciar_aplicacao()` chama `configurar_logs()` uma vez; `print` trocado por log (fases 2 e 3). Na fase 8, `run_pipeline()` passou a fazer só a ingestão (com resumo), a análise foi para `gerar_relatorio()` e foi criado o comando `python main.py --ingestao`. Na fase 15, `gerar_relatorio()` passou a analisar o modelo 3FN e foi criado `--analise` (com `--estacao`, `--inicio`, `--fim`, via `argparse`). |
+| `src/ingestion/bronze_writer.py` | Criado na fase 8 e **removido em 05/10/2026**: o Data Lake não será implementado neste projeto (decisão de 06/10/2026). |
 | `src/services/parametro_service.py` (novo, fase 7) | `sincronizar()`: cadastra parâmetros novos sem faixa e rejeita, com ERROR, os que não podem ser usados; `faixas()` para a validação. |
-| `src/logger.py` (novo) | Configuração única de log: `configurar_logs()`, loggers `DataScienceIA_Logger` e `DataScienceIA_Rejeitados`, `registrar_rejeicao(...)`. |
+| `src/logger.py` (novo) | Configuração única de log: `configurar_logs()`, loggers `DataScienceIA_Logger` e `DataScienceIA_Rejeitados`, `registrar_rejeicao(...)`. Fase 9: pasta trocável por `PASTA_LOGS`. Fase 15: `registrar_anomalias()` (uma linha `WARNING` por anomalia da análise). |
 | `src/security.py` (novo) | Único ponto de anonimização e criptografia: `anonimizar_cpf`, `anonimizar_nome`, `criptografar_email`, `descriptografar_email` ([seguranca-lgpd.md](seguranca-lgpd.md)). |
 | [src/config.py](../src/config.py) | Ler `CHAVE_CRIPTOGRAFIA` (e `PEPPER_HASH`, se D8 aprovada) e falhar se ausente, sem expor o valor. |
 | [.env.example](../.env.example) | Incluir `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH` (só os nomes). `MOCK_API` foi renomeada para `FONTE_DADOS` (D3). |
@@ -252,9 +252,9 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 | [src/ingestion/importar_dados.py](../src/ingestion/importar_dados.py) | **Reescrito na fase 8:** `importar_municipios`, `importar_operadores`, `importar_estacoes` e `importar_leituras`, cada uma idempotente e devolvendo o mapa chave → id. Plano original: reescrita para a nova ordem: Estados (busca) → Municípios → Operadores → Estações → Parâmetros → Leituras/Itens (por partição). Os caches `__cidades`, `__operadores` e `__estacoes` passam a ser municípios, operadores, estações e parâmetros. |
 | [src/services/normalization_service.py](../src/services/normalization_service.py) | **Reescrito na fase 4:** payload novo, cabeçalho + itens, descoberta de parâmetros, anonimização e minimização, rejeição por item ou leitura sem derrubar o lote. |
 | [src/services/validation_service.py](../src/services/validation_service.py) | **Reescrito nas fases 5 e 6:** um resultado por registro (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`, `registro`; contrato na seção 4), sem abortar o lote. Faixas, siglas e parâmetros aceitos recebidos no construtor; a `run_pipeline()` os lê do banco desde a fase 7. |
-| [src/models/](../src/models/) | **Fase 8:** `MunicipioModel` e `LeituraItemModel` novos; `EstacaoModel`, `OperadorModel` e `LeituraModel` no formato do DDL; `CidadeModel` mantido só para a análise legada. Plano original: `CidadeModel` → `MunicipioModel`; `EstadoModel` já existe; `ParametroModel` criado na fase 7; novo `LeituraItemModel`; `LeituraModel` vira cabeçalho (`operador_id`, `estacao_id`, `data_hora`, `fonte`); `OperadorModel` e `EstacaoModel` seguem as colunas do DDL. |
-| [src/repository/](../src/repository/) | **Fase 8:** `MunicipioRepository` novo; `OperadorRepository` reescrito (`MERGE`); `EstacaoRepository.merge_many`; `LeituraRepository.substituir_leituras` e `save_readings` novos; métodos com f-string e consultas quebradas removidos; `CidadeRepository` e as consultas legadas mantidos só para a análise. Plano original: `CidadeRepository` → `MunicipioRepository`; `EstadoRepository` já existe; `ParametroRepository` criado na fase 7; novo repositório de itens de leitura; todos os `create_many` passam a ser idempotentes (`MERGE`/partição). Há métodos com SQL montado por f-string (`create` em `leitura_repository.py` e `operador_repository.py`) que precisam sair. |
-| [src/services/analytics_service.py](../src/services/analytics_service.py), [src/cli/](../src/cli/), [src/services/report_service.py](../src/services/report_service.py) | Consultam `Cidades` e as colunas largas de `Leituras` e **vão quebrar**. Precisam ler `Leitura_Itens` + `Parametros` e pivotar no pandas. Fica fora do TODO de idempotência e entra na fase de analytics. |
+| [src/models/](../src/models/) | **Fase 8:** `MunicipioModel` e `LeituraItemModel` novos; `EstacaoModel`, `OperadorModel` e `LeituraModel` no formato do DDL; `CidadeModel` removido na fase 13. Plano original: `CidadeModel` → `MunicipioModel`; `EstadoModel` já existe; `ParametroModel` criado na fase 7; novo `LeituraItemModel`; `LeituraModel` vira cabeçalho (`operador_id`, `estacao_id`, `data_hora`, `fonte`); `OperadorModel` e `EstacaoModel` seguem as colunas do DDL. |
+| [src/repository/](../src/repository/) | **Fase 8:** `MunicipioRepository` novo; `OperadorRepository` reescrito (`MERGE`); `EstacaoRepository.merge_many`; `LeituraRepository.substituir_leituras` e `save_readings` novos; métodos com f-string e consultas quebradas removidos; **Fase 13:** `CidadeRepository` e as consultas legadas removidos; `LeituraRepository.get_medicoes()`, `MunicipioRepository.get_com_estacoes()`, `EstacaoRepository.get_by_municipio()` e `get_by_codigo()` novos. Plano original: `CidadeRepository` → `MunicipioRepository`; `EstadoRepository` já existe; `ParametroRepository` criado na fase 7; novo repositório de itens de leitura; todos os `create_many` passam a ser idempotentes (`MERGE`/partição). Há métodos com SQL montado por f-string (`create` em `leitura_repository.py` e `operador_repository.py`) que precisam sair. |
+| [src/services/analytics_service.py](../src/services/analytics_service.py), [src/cli/](../src/cli/), [src/services/report_service.py](../src/services/report_service.py) | **Reescritos nas fases 14 a 16** sobre `Leitura_Itens` + `Parametros`: análise por estação + parâmetro (sem pivotar: uma linha por medição), anomalias por IQR ou Z-Score com indicador de alerta, relatório com CSV e CLI município → estação → período ([analise-estatistica.md](analise-estatistica.md)). |
 | [requirements.txt](../requirements.txt) | Adicionar `cryptography` (Fernet). O `src/cli` também usa `rich`, que não está listado. |
 | [sql/dml_populacao.sql](../sql/dml_populacao.sql) | Carga inicial: 27 estados e os 11 parâmetros conhecidos, com faixas. |
 | [.gitignore](../.gitignore) | Adicionar `logs/` e os arquivos de dados de `data_lake/` (mantendo os `.gitkeep`), porque a Bronze guarda dado pessoal em claro. |
@@ -263,8 +263,8 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 
 ## 8. Impacto nos testes
 
-- `tests/integration/conftest.py` já monta o banco de teste com o DDL + migrations. `test_persistencia.py` e `test_pipeline_e2e.py` ainda usam o modelo antigo e estão pulados (`pytest.mark.skip`) até serem reescritos nas fases 8 e 10.
-- `test_normalization_service.py` (fase 4), `test_validation_service.py` (fases 5 e 6) e `tests/test_quality_stat.py` já usam o payload novo. A fixture `registro_legado` (formato antigo) sobra só para `integration/test_persistencia.py`, que está pulado.
+- `tests/integration/conftest.py` monta o banco de teste com o DDL + migrations + DML. `test_persistencia.py` e `test_pipeline_e2e.py` foram reescritos para o modelo 3FN na fase 10.
+- `test_normalization_service.py` (fase 4), `test_validation_service.py` (fases 5 e 6) e `tests/test_quality_stat.py` usam o payload novo. A fixture `registro_legado` (formato antigo) foi removida na fase 10.
 - `test_analytics_service.py` e `test_report_service.py` dependem das colunas largas.
 - Novo `tests/test_quality_stat.py`: completude, acurácia, descoberta de parâmetros, idempotência (rodar duas vezes e conferir contagens) e conteúdo do log de rejeitados.
 - Novos testes de `src/security.py` (hash determinístico com 64 caracteres, `None` para vazio, ida e volta da criptografia do e-mail) e de `src/logger.py` (formato da linha e ausência de dado pessoal no arquivo de rejeitados).
@@ -300,6 +300,9 @@ Precisam de resposta antes da fase correspondente do TODO.
 | D5 | Campos do payload sem coluna no DDL: `cidade_codigo`, `estacao_ativa`, `estacao_tipo`, `operador_ativo`, `<param>_codigo`, `data_hora_leitura_<param>` | (a) descartar; (b) adicionar colunas | **(a)** por ora, registrando no `INFO` de resumo. Reavaliar `data_hora_leitura_<param>` (hora exata de cada medição) para a Gold. |
 | D6 | Faixas de `valor_minimo`/`valor_maximo` dos 11 parâmetros | Proposta no TODO (fase 3) | **Proposta aplicada no `dml_populacao.sql` em 05/10/2026, aguardando validação do time.** pH 0–14 e umidade 0–100 vêm do enunciado e do código atual. Para mudar, basta editar o DML e reexecutá-lo (`MERGE` atualiza as faixas). |
 | D7 | Onde gravar o e-mail criptografado: `email_hash VARCHAR(64)` não comporta um token Fernet (cerca de 140 caracteres para um e-mail comum) | (a) trocar `email_hash` por `email_criptografado VARCHAR(255) NULL`; (b) manter `email_hash` e adicionar `email_criptografado`; (c) só hash, sem recuperação | **Aprovada (a) em 05/10/2026; migration V002.** segue o exemplo `security.py` e o item 3.2 do enunciado (reversível para dado que exige recuperação). Exige alterar o DDL e o banco, junto com a D1. |
+| D9 | Indicador de alerta de qualidade das leituras anômalas (PDF 3.4) | (a) só no resultado da análise, no relatório/CSV e em WARNING no log; (b) coluna `alerta_qualidade` em `Leitura_Itens`, atualizada pela análise (migration) | **Aprovada (a) em 06/10/2026.** O outlier depende do recorte analisado (estação, período); gravado no banco ficaria desatualizado a cada carga. A Gold, onde caberia, não será implementada. |
+| D10 | Regra do Z-Score | (a) anômala se fora do IQR **ou** com \|Z\| > 3, indicador informando o(s) método(s) (`IQR`, `ZSCORE`, `IQR+ZSCORE`); (b) anômala só se fora do IQR **e** \|Z\| > 3 (Z-Score confirma o IQR); (c) limite \|Z\| > 2 | **Aprovada (a) em 06/10/2026**, com \|Z\| > 3: mostra o resultado de cada método sem esconder nenhum; o indicador diz qual sinalizou. |
+| D11 | Agrupamento dos parâmetros na CLI (`Parametros` não tem grupo) | (a) mostrar todos os parâmetros da estação juntos (sem o menu de tipo); (b) grupo fixo no código por código de parâmetro; (c) coluna `grupo` em `Parametros` (migration + DML) | **Aprovada (a) em 06/10/2026**: não exige schema nem lista fixa e funciona para parâmetros novos. |
 | D8 | Hash de CPF e nome com pepper | (a) SHA-256 puro, como no exemplo; (b) SHA-256 de `PEPPER_HASH` + valor | **Implementada configurável na fase 2** (`PEPPER_HASH` preenchido = HMAC-SHA256). Recomendação mantida: (b). o CPF tem só 10¹¹ combinações e o SHA-256 puro pode ser revertido por força bruta. Mantém os 64 caracteres. |
 
 ---
@@ -487,11 +490,25 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 
 ### Fase 9 — Validação do banco após a carga
 
-- **Status:** pendente.
+- **Status:** conferências automatizadas e aprovadas no banco de teste (06/10/2026); **carga real no banco `impacta` bloqueada**.
+- **Bloqueio:** o firewall do Azure SQL recusa o IP atual da máquina. Liberar o IP no portal (servidor `impacta` → *Networking*) e então rodar `python main.py --ingestao` duas vezes e as consultas do TODO.
+- **Coberto pelos testes de integração** (SQL Server Express local, dataset completo):
+  - duas execuções seguidas da `run_pipeline()`: mesmo resumo e mesmas contagens; a 2ª substitui as 9.806 leituras;
+  - todas as consultas de duplicidade, órfãos, faixa e hash/e-mail voltam vazias;
+  - leituras no banco (9.806) + leituras no log de rejeitados (82) = 9.888 recebidos;
+  - por parâmetro, itens gravados + itens rejeitados = 9.806;
+  - backfill de um dia: só aquela partição muda (inclusive remoção de um registro ausente no reenvio e correção de um valor);
+  - nenhum CPF, nome ou e-mail do dataset nos logs.
+- **Isolamento dos logs:** os testes gravavam em `logs/` (subprocessos de `main.py`), o que misturaria arquivos de teste com os da carga real. `configurar_logs()` passou a aceitar a variável `PASTA_LOGS`, que o `tests/conftest.py` aponta para uma pasta temporária; `logs/` foi esvaziada.
 
 ### Fase 10 — Testes
 
-- **Status:** pendente.
+- **Status:** concluída em 06/10/2026 para a ingestão (estatística e outliers ficam para a fase de analytics).
+- `src/security.py` e `src/logger.py` já tinham os testes pedidos (`test_security.py`, `test_logger.py`); acrescentado o teste de `PASTA_LOGS`.
+- `tests/integration/test_persistencia.py` (6 testes) e `test_pipeline_e2e.py` (3 testes) reescritos para o modelo 3FN, sem `skip`. Fixtures novas `normalizados` e `lote` em `tests/integration/conftest.py`; `registros_completos` e `registro_legado` removidas.
+- **Rollback:** uma falha simulada logo depois de gravar leituras e itens (dentro da transação) não deixa nada gravado na primeira carga e preserva a carga anterior no reprocessamento (mesmos ids, valores e contagens).
+- **Resultado:** `162 passed` com o banco de teste (cerca de 1 min); `153 passed, 9 skipped` sem ele.
+- Os testes de `analytics_service` e `report_service` foram reescritos junto com o Analytics (fases 14 e 15).
 
 ### Fase 11 — Documentação
 
@@ -516,3 +533,51 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 
   Esta análise fica como histórico das mudanças e das decisões.
 - **Validações:** nenhum link quebrado nos `.md` de `docs/` e no README; nenhuma referência restante a `Cidades`, `criar_tabelas`, `validar_estacao` ou `MOCK_API` fora dos trechos que explicam a mudança.
+
+### Fase 12 — Decisões de Analytics
+
+- **Status:** concluída em 06/10/2026.
+- Requisito levantado do PDF: item 3.4 (média e mediana por parâmetro e estação; desvio padrão, variância e IQR; outliers por IQR e validação por Z-Score; indicador de alerta de qualidade) e critério 4 da seção 6 (logs comprovando a detecção de outliers).
+- **Decisões aprovadas** (seção 10): D9 = indicador só na análise, sem schema; D10 = IQR **ou** \|Z\| > 3, com o indicador dizendo qual regra sinalizou; D11 = CLI com todos os parâmetros juntos.
+- O Data Lake foi retirado do escopo (não será implementado); os documentos que diziam "outra frente do projeto" foram ajustados.
+
+### Fase 13 — Leitura dos dados no modelo 3FN
+
+- **Status:** concluída em 06/10/2026.
+- `LeituraRepository.get_medicoes()`: uma linha por medição (`Leitura_Itens` + `Leituras` + `Parametros` + `Estacoes`), filtros por estação, município, parâmetros e período (só início = um dia), ordenada por estação, parâmetro e data/hora; tudo parametrizado.
+- `MunicipioRepository.get_com_estacoes()` (com a sigla do estado), `EstacaoRepository.get_by_municipio()` e `get_by_codigo()`.
+- **Removidos:** `CidadeRepository`, `CidadeModel`, `EstacaoRepository.get_estacao_cidade()` e as quatro consultas `get_leituras_*` do modelo antigo. Nenhuma referência a `Cidades` ou às colunas largas restou no código.
+- **Validação:** `integration/test_analytics.py` (104.582 medições, filtros por dia, período, estação e parâmetro, municípios e estações).
+
+### Fase 14 — Estatística e outliers
+
+- **Status:** concluída em 06/10/2026.
+- `AnaliticsService.analisar_medicoes()` (pandas, sem banco): grupos estação + parâmetro; quantidade, média, mediana, desvio padrão e variância amostrais, Q1, Q3, IQR, mínimo, máximo, limites IQR (com 4 valores ou mais) e quantidade de anomalias; Z-Score com o desvio amostral, indefinido com desvio zero ou um valor.
+- Anomalias com estação, parâmetro, unidade, data/hora, `codigo_registro`, valor, limites, Z-Score e alerta (`IQR`, `ZSCORE`, `IQR+ZSCORE`). Nada é removido.
+- `calculate_metrics(estacao_id, municipio_id, data_inicio, data_fim)` lê o recorte e devolve escopo, período, estatísticas e anomalias. A lista fixa de colunas e nomes do modelo antigo saiu: os parâmetros vêm do banco.
+- **Resultado com o dataset atual:** 1.824 anomalias (1.528 `IQR`, 296 `IQR+ZSCORE`, nenhuma só por Z-Score).
+- **Ponto para o time:** na precipitação, IQR = 0 (maioria 0 mm) faz toda chuva acima de zero virar `IQR` (1.210 alertas). Mudar a regra para dados com muitos zeros exige decisão; registrado em [analise-estatistica.md](analise-estatistica.md).
+- **Validação:** 10 testes unitários (CT-04, CT-05, CT-14) e 4 de aceite em `tests/test_quality_stat.py`.
+
+### Fase 15 — Relatório, logs e consultas SQL
+
+- **Status:** concluída em 06/10/2026.
+- `ReportService`: `generate_report()` no formato novo, `format_report()` (resumo, tabela de métricas e de anomalias, arredondadas) e `salvar_csv()` (cria a pasta).
+- `main.py`: `gerar_relatorio(database, codigo_estacao, data_inicio, data_fim)` registra o relatório em `INFO` e cada anomalia em `WARNING` (`logger.registrar_anomalias()`); estação inexistente gera `ValueError` → `CRITICAL` e código `1`. Argumentos com `argparse`: `--ingestao` ou `--analise`, com `--estacao`, `--inicio` e `--fim` (formato ISO, validados; `--fim` exige `--inicio`).
+- `sql/queries_analiticas.sql` (estava vazio): métricas por estação e parâmetro (`GROUP BY`, `STDEV`, `VAR`), quartis e limites IQR (`PERCENTILE_CONT`), anomalias com o indicador (funções de janela), volume por dia e medições por parâmetro. Variáveis `@codigo_estacao`, `@data_inicio`, `@data_fim`.
+- **Validação:** `integration/test_analytics.py` compara as consultas com o serviço sobre o mesmo banco (mesmas métricas e mesma lista de anomalias, CT-15) e confere uma linha `WARNING` por anomalia; testes unitários de argumentos, do relatório e do log.
+
+### Fase 16 — CLI no modelo 3FN
+
+- **Status:** concluída em 06/10/2026.
+- Fluxo município → estação → período → métricas e anomalias de todos os parâmetros (D11). As dependências (análise, relatório, console e pasta) passaram a ser injetáveis, para testar.
+- **Correções:** as datas digitadas (`dd/mm/aaaa`) eram passadas como texto para o SQL e agora são convertidas para `date`; salvar CSV falhava sem a pasta `relatorios/` e agora a cria; a mensagem "relatório salvo" aparecia mesmo sem salvar e agora só aparece após salvar; `print` substituído por `console.print`; `input` e `console.input` misturados viraram só `console.input`.
+- `relatorios/` incluída no `.gitignore`.
+- **Validação:** `unit/test_console_app.py` com entradas simuladas (8 testes).
+
+### Fase 17 — Documentação de Analytics
+
+- **Status:** concluída em 06/10/2026.
+- `analise-estatistica.md` reescrito (métricas, regras, indicador, como executar, resultado e limitação da precipitação).
+- Ajustados: `README.md`, `arquitetura.md`, `manual-execucao.md` (`--analise` e CLI), `requisitos.md` (RF06 a RF08), `modelagem-banco.md` (consultas analíticas), `contrato-dados.md` e `seguranca-lgpd.md` (Data Lake fora do escopo), os três diagramas (sequência da análise em `diagrama-sequencia.md`) e `plano-testes.md` (CT-14, CT-15, arquivos e contagens).
+- **Validação:** `183 passed, 18 skipped` sem banco de teste; `201 passed` com o SQL Server Express local; nenhuma referência restante a `CidadeRepository`, `get_leituras_*`, "fase de analytics" ou "outra frente" fora deste histórico.

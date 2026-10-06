@@ -1,3 +1,4 @@
+import argparse
 import sys
 from datetime import date
 from typing import Any
@@ -6,7 +7,13 @@ from src.cli.console_app import Console_APP
 from src.config import Settings, load_config
 from src.database.connection import DatabaseConnection
 from src.ingestion.data_client import DataClient
-from src.logger import configurar_logs, logger, registrar_resultados_validacao, registrar_resumo
+from src.logger import (
+    configurar_logs,
+    logger,
+    registrar_anomalias,
+    registrar_resultados_validacao,
+    registrar_resumo,
+)
 from src.repository.estado_repository import EstadoRepository
 from src.repository.leitura_repository import LeituraRepository
 from src.repository.parametro_repository import ParametroRepository
@@ -62,19 +69,32 @@ def run_pipeline() -> dict[str, int]:
     return resumo
 
 
-def gerar_relatorio(database: DatabaseConnection) -> dict[str, Any]:
+def gerar_relatorio(
+    database: DatabaseConnection,
+    codigo_estacao: str | None = None,
+    data_inicio: date | None = None,
+    data_fim: date | None = None,
+) -> dict[str, Any]:
     """
-    Análise estatística e relatório da Parte 1.
+    Análise estatística das medições gravadas (item 3.4 do enunciado).
 
-    Ainda consulta o modelo antigo (Cidades e Leituras larga); será adaptada ao
-    modelo 3FN na fase de analytics e, até lá, não é chamada pela ingestão.
+    Sem estação, analisa todas. Registra o relatório em INFO e cada medição
+    anômala em WARNING no log da execução. Devolve o relatório estruturado.
     """
-    indicadores = AnaliticsService(database).calculate_metrics(
-        cidade_id=1,
-        data_inicio=date(2026, 6, 1),
-        data_fim=date(2026, 12, 1),
+    analise = AnaliticsService(database)
+    estacao_id = None
+    if codigo_estacao is not None:
+        estacao = analise.buscar_estacao_por_codigo(codigo_estacao)
+        if estacao is None:
+            raise ValueError(f"Estação não cadastrada: {codigo_estacao}")
+        estacao_id = estacao.id_estacao
+
+    relatorio = ReportService().generate_report(
+        analise.calculate_metrics(estacao_id=estacao_id, data_inicio=data_inicio, data_fim=data_fim)
     )
-    return ReportService().generate_report(indicadores)
+    _exibir_resultados(relatorio)
+    registrar_anomalias(relatorio["anomalias"])
+    return relatorio
 
 
 def iniciar_aplicacao() -> Settings:
@@ -93,11 +113,40 @@ def _exibir_resultados(resultados: dict[str, Any]) -> None:
         logger.info(f"Relatório da execução:\n{texto}")
 
 
+def ler_argumentos(argv: list[str]) -> argparse.Namespace:
+    """Sem argumentos abre a CLI; --ingestao carrega o banco; --analise gera o relatório."""
+    parser = argparse.ArgumentParser(description="Pipeline de dados ambientais")
+    modo = parser.add_mutually_exclusive_group()
+    modo.add_argument("--ingestao", action="store_true", help="coleta, valida e grava no banco")
+    modo.add_argument("--analise", action="store_true", help="estatística e outliers das medições gravadas")
+    parser.add_argument("--estacao", metavar="CODIGO", help="código da estação (padrão: todas)")
+    parser.add_argument("--inicio", type=date.fromisoformat, metavar="AAAA-MM-DD",
+                        help="sozinha, analisa só esse dia")
+    parser.add_argument("--fim", type=date.fromisoformat, metavar="AAAA-MM-DD")
+    argumentos = parser.parse_args(argv)
+
+    if not argumentos.analise and (argumentos.estacao or argumentos.inicio or argumentos.fim):
+        parser.error("--estacao, --inicio e --fim só valem com --analise")
+    if argumentos.fim and not argumentos.inicio:
+        parser.error("--fim exige --inicio")
+    if argumentos.inicio and argumentos.fim and argumentos.inicio > argumentos.fim:
+        parser.error("--inicio não pode ser maior que --fim")
+    return argumentos
+
+
 if __name__ == "__main__":
+    argumentos = ler_argumentos(sys.argv[1:])
     try:
-        iniciar_aplicacao()
-        if "--ingestao" in sys.argv[1:]:
+        settings = iniciar_aplicacao()
+        if argumentos.ingestao:
             run_pipeline()
+        elif argumentos.analise:
+            gerar_relatorio(
+                DatabaseConnection(settings.azure_sql_connectionstring),
+                argumentos.estacao,
+                argumentos.inicio,
+                argumentos.fim,
+            )
         else:
             console_app = Console_APP()
             console_app.run()

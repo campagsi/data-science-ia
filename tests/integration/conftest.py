@@ -74,14 +74,10 @@ def connection_string():
         _admin(remover)
 
 
-@pytest.fixture
-def database(connection_string):
+def limpar_banco(connection_string: str):
     """
-    Conexão com o banco de teste, limpo a cada teste.
-
-    Todas as tabelas são esvaziadas e o DML de domínio é reaplicado, para que
-    cada teste comece só com os 27 estados e os 11 parâmetros conhecidos
-    (sem parâmetros cadastrados por um teste anterior).
+    Esvazia todas as tabelas e reaplica o DML de domínio, para começar só com
+    os 27 estados e os 11 parâmetros conhecidos. Devolve a conexão.
     """
     from src.database.connection import DatabaseConnection
 
@@ -95,22 +91,56 @@ def database(connection_string):
     return db
 
 
-@pytest.fixture(scope="session")
-def registros_completos():
-    """Registros do dataset da API que possuem todas as medições."""
-    from src.api.dataset_repository import DatasetRepository
+def preparar_lote(database, normalizados: list[dict]) -> dict:
+    """
+    Prepara o lote como a run_pipeline(): sincroniza os parâmetros com o banco
+    e valida com as faixas e siglas lidas dele.
+
+    Devolve {"validos", "parametros", "resultados"}; "validos" é o que vai para
+    LeituraRepository.save_readings().
+    """
+    from src.repository.estado_repository import EstadoRepository
+    from src.repository.parametro_repository import ParametroRepository
     from src.services.normalization_service import NormalizationService
+    from src.services.parametro_service import ParametroService
     from src.services.validation_service import ValidationService
 
-    normalizados = NormalizationService().normalize(DatasetRepository().get_all())
-    completos = [
-        r for r in normalizados
-        if all(
-            r.get(campo) is not None
-            for campo in ValidationService._REQUIRED_FIELDS + NormalizationService._FLOAT_FIELDS
-        )
-    ]
-    return ValidationService().validate_data(completos)
+    parametros = ParametroService(ParametroRepository(database)).sincronizar(
+        NormalizationService.descobrir_parametros(normalizados)
+    )
+    resultados = ValidationService(
+        faixas=ParametroService.faixas(parametros),
+        siglas_estados={e.sigla for e in EstadoRepository(database).get_all()},
+        parametros_validos=set(parametros),
+    ).validate_data(normalizados)
+    return {
+        "validos": ValidationService.registros_validos(resultados),
+        "parametros": parametros,
+        "resultados": resultados,
+    }
+
+
+@pytest.fixture
+def database(connection_string):
+    """Conexão com o banco de teste, limpo a cada teste (limpar_banco)."""
+    return limpar_banco(connection_string)
+
+
+@pytest.fixture(scope="session")
+def normalizados():
+    """Dataset da API normalizado e anonimizado com as chaves de teste (fase 4)."""
+    from src.api.dataset_repository import DatasetRepository
+    from src.security import configurar_seguranca
+    from src.services.normalization_service import NormalizationService
+
+    configurar_seguranca(os.environ["CHAVE_CRIPTOGRAFIA"], os.environ["PEPPER_HASH"])
+    return NormalizationService().normalize(DatasetRepository().get_all())
+
+
+@pytest.fixture
+def lote(database, normalizados):
+    """Lote do dataset completo pronto para gravar (preparar_lote)."""
+    return preparar_lote(database, normalizados)
 
 
 @pytest.fixture
@@ -119,3 +149,24 @@ def contagens(database):
     return lambda: {
         t: database.fetch_one(f"SELECT COUNT(*) FROM dbo.{t}")[0] for t in reversed(TABELAS)
     }
+
+
+@pytest.fixture(scope="module")
+def banco_carregado(connection_string, normalizados):
+    """
+    Banco de teste com o dataset completo gravado uma vez por módulo, para
+    testes só de leitura (consultas e análise). Os testes que usam a fixture
+    database limpam o banco de novo.
+    """
+    from src.repository.leitura_repository import LeituraRepository
+
+    db = limpar_banco(connection_string)
+    lote = preparar_lote(db, normalizados)
+    LeituraRepository(db).save_readings(lote["validos"], lote["parametros"], "http://api-de-teste")
+    return db
+
+
+@pytest.fixture(scope="session")
+def consultas_analiticas() -> list[str]:
+    """Lotes de sql/queries_analiticas.sql, na ordem do arquivo."""
+    return _lotes(RAIZ / "sql" / "queries_analiticas.sql")

@@ -104,3 +104,63 @@ def test_log_de_rejeitados_tem_tudo_o_que_nao_foi_importado(resultados, logs_tem
         for campo in ("operador_cpf", "operador_email"):
             if registro[campo]:
                 assert registro[campo] not in texto
+
+
+# --- Estatística e outliers (aceite da fase 14) ---
+
+
+@pytest.fixture(scope="module")
+def analise(resultados):
+    """Análise dos itens válidos, no formato de LeituraRepository.get_medicoes()."""
+    from src.services.analytics_service import AnaliticsService
+
+    medicoes = [
+        {
+            "estacao_id": 1,
+            "estacao_codigo": r["registro"]["estacao_codigo"],
+            "estacao": r["registro"]["estacao_nome"],
+            "codigo_registro": r["registro_codigo"],
+            "data_hora": r["registro"]["data_hora_ciclo"],
+            "codigo_parametro": item["codigo_parametro"],
+            "parametro": item["campo"],
+            "unidade_medida": item["unidade_medida"],
+            "valor": item["valor"],
+        }
+        for r in _validos(resultados)
+        for item in r["registro"]["itens"]
+    ]
+    return AnaliticsService.analisar_medicoes(medicoes)
+
+
+def test_analise_cobre_as_leituras_e_os_11_parametros(analise):
+    assert (analise["leituras"], analise["medicoes"]) == (9806, 104582)
+    assert len(analise["estatisticas"]) == 11
+    for estatistica in analise["estatisticas"]:
+        assert estatistica["Variância"] == pytest.approx(estatistica["Desvio Padrão"] ** 2)
+        assert estatistica["IQR"] == pytest.approx(estatistica["Q3"] - estatistica["Q1"])
+
+
+def test_anomalias_por_iqr_e_zscore_com_o_dataset_atual(analise):
+    por_alerta = Counter(a["Alerta"] for a in analise["anomalias"])
+    por_parametro = {e["Código"]: e["Anomalias"] for e in analise["estatisticas"]}
+
+    assert por_alerta == {"IQR": 1528, "IQR+ZSCORE": 296}
+    assert por_parametro == {
+        "TIP-CHU": 1210, "TIP-CON": 101, "TIP-OXI": 76, "TIP-PH": 73, "TIP-PRE": 75, "TIP-RAD": 0,
+        "TIP-TAG": 47, "TIP-TMP": 71, "TIP-TUR": 92, "TIP-UMI": 53, "TIP-VEN": 26,
+    }
+
+
+def test_toda_anomalia_esta_fora_do_iqr_ou_acima_de_3_desvios(analise):
+    for a in analise["anomalias"]:
+        fora_iqr = a["Valor"] < a["Limite Inferior"] or a["Valor"] > a["Limite Superior"]
+        fora_z = abs(a["Z-Score"]) > 3
+        assert (fora_iqr, fora_z) == {"IQR": (True, False), "ZSCORE": (False, True), "IQR+ZSCORE": (True, True)}[a["Alerta"]]
+
+
+def test_precipitacao_com_iqr_zero_sinaliza_toda_chuva(analise):
+    """Limitação conhecida da regra IQR em dados com muitos zeros (docs/analise-estatistica.md)."""
+    (chuva,) = [e for e in analise["estatisticas"] if e["Código"] == "TIP-CHU"]
+
+    assert chuva["IQR"] == 0
+    assert all(a["Valor"] > 0 for a in analise["anomalias"] if a["Parâmetro"] == "precipitacao")

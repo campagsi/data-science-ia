@@ -1,4 +1,4 @@
-# TODO — Idempotência e campos nulos
+# TODO — Idempotência, campos nulos e Analytics
 
 Fases para que a ingestão grave no novo banco 3FN sem duplicar dados, trate campos nulos e registre em log **tudo o que não foi importado**.
 
@@ -98,7 +98,7 @@ Desenho em [seguranca-lgpd.md](seguranca-lgpd.md) e na seção 6 da análise.
 - [x] Níveis: INFO para progresso, WARNING para descarte ou tratamento, ERROR para falha de etapa, CRITICAL para falha de conexão
 - [x] Nenhum outro módulo chama `basicConfig` ou `print`; `print` removido de `main.py` e `importar_dados.py` (a CLI `rich` continua com `console.print`, que é interface, não log)
 - [x] `registrar_resumo(**contagens)` e `contar_rejeicoes()` disponíveis
-- [ ] Chamar o resumo com as contagens reais (recebidos, leituras importadas e rejeitadas, itens gravados e rejeitados, parâmetros novos) → fase 8
+- [x] Chamar o resumo com as contagens reais → feito na fase 8 (`run_pipeline()` → `registrar_resumo()`; testado em `integration/test_pipeline_e2e.py`)
 
 **`src/security.py`** (padrão `security.py`)
 
@@ -118,8 +118,8 @@ Desenho em [seguranca-lgpd.md](seguranca-lgpd.md) e na seção 6 da análise.
 
 - [x] Uma execução gera os dois arquivos de log no formato definido (testado)
 - [x] Valores de campos pessoais nunca entram no log de rejeitados (testado)
-- [ ] Leituras importadas + rejeitadas = total recebido → conferir na fase 9
-- [ ] Busca por CPF, nome ou e-mail em `logs/` após uma carga real → conferir na fase 9
+- [x] Leituras importadas + rejeitadas = total recebido (testado na integração, fase 9)
+- [ ] Busca por CPF, nome ou e-mail em `logs/` após uma carga real → testado na integração; falta a carga real (fase 9)
 
 ---
 
@@ -275,7 +275,7 @@ Ordem, tudo dentro de **uma** transação (`LeituraRepository.save_readings` →
 - [x] Adaptar `save_readings(registros, parametros, fonte)` e `importar_dados.py` à nova ordem (caches viram valores de retorno, não globais)
 - [x] ~~Data Lake: gravar a Bronze~~ — implementada em `src/ingestion/bronze_writer.py` e **removida em 05/10/2026**: o Data Lake é tratado em outra frente do projeto
 - [x] `run_pipeline()` passa a fazer só a ingestão e devolve o resumo (também registrado em INFO); a análise legada vai para `gerar_relatorio()`; comando `python main.py --ingestao`
-- [ ] Adaptar `CidadeRepository`, as consultas legadas de `EstacaoRepository`/`LeituraRepository`, a análise e a CLI ao modelo 3FN → fase de analytics (fora deste TODO)
+- [x] Adaptar `CidadeRepository`, as consultas legadas de `EstacaoRepository`/`LeituraRepository`, a análise e a CLI ao modelo 3FN → fases 13 a 16
 
 **Aceite** (banco `impacta`, dataset completo, dentro de uma transação desfeita com rollback ao final):
 
@@ -330,25 +330,30 @@ JOIN Parametros P ON P.id_parametro = I.parametro_id
 GROUP BY P.codigo_parametro ORDER BY 1;
 ```
 
-- [ ] Conferir: `Leituras` no banco + leituras no log de rejeitados = registros recebidos
-- [ ] Conferir: itens por parâmetro no banco + itens rejeitados do parâmetro = leituras gravadas
-- [ ] Backfill: rodar só uma data histórica e confirmar que só aquela partição muda
+- [x] Conferências automatizadas no banco de teste (`tests/integration/`, 06/10/2026): todas as consultas acima vazias e contagens iguais nas duas execuções
+- [x] Conferir: `Leituras` no banco + leituras no log de rejeitados = registros recebidos (9.806 + 82 = 9.888, testado)
+- [x] Conferir: itens por parâmetro no banco + itens rejeitados do parâmetro = leituras gravadas (testado)
+- [x] Backfill: rodar só uma data histórica e confirmar que só aquela partição muda (testado)
+- [x] Logs de testes isolados de `logs/` (`PASTA_LOGS`), para a pasta guardar só a carga real
+- [ ] **Carga real no banco `impacta`**: duas execuções de `python main.py --ingestao` + as consultas acima + busca por CPF, nome e e-mail em `logs/`. **Bloqueado:** liberar o IP da máquina no firewall do Azure SQL
 
 ---
 
 ## Fase 10 — Testes
 
 - [x] [tests/test_quality_stat.py](../tests/test_quality_stat.py): completude, acurácia e log de rejeitados com o dataset completo (aceite das fases 5 e 6)
-- [ ] `tests/test_quality_stat.py`: estatística e outliers (fase de analytics)
+- [x] `tests/test_quality_stat.py`: estatística e outliers (fase 14)
 - [x] Testes unitários: normalização do payload novo (fase 4)
 - [x] Testes unitários: `validate_data` devolvendo um resultado por registro (`valido`, `campos_nulos` com todos os nulos, `itens_invalidos`, `motivos`, `registro` só com itens válidos) e o log gerado a partir desses resultados
-- [ ] `src/security.py`: hash determinístico com 64 caracteres, `None` para vazio, ida e volta de `criptografar_email` / `descriptografar_email`
-- [ ] `src/logger.py`: formato da linha de rejeitado e ausência de CPF, nome e e-mail nos arquivos de `logs/`
-- [ ] Integração: reescrever `test_persistencia.py` e `test_pipeline_e2e.py` para o modelo 3FN (hoje pulados com `pytest.mark.skip`), rodar o pipeline duas vezes e comparar as contagens. O banco de teste já é montado com DDL + migrations
-- [ ] Integração: forçar erro no meio da carga e conferir o rollback
-- [ ] Atualizar os testes existentes que usam o payload ou as tabelas antigas (seção 8 da análise)
+- [x] `src/security.py`: hash determinístico com 64 caracteres, `None` para vazio, ida e volta de `criptografar_email` / `descriptografar_email`
+- [x] `src/logger.py`: formato da linha de rejeitado e ausência de CPF, nome e e-mail nos arquivos de `logs/`
+- [x] Integração: reescrever `test_persistencia.py` e `test_pipeline_e2e.py` para o modelo 3FN, rodar o pipeline duas vezes e comparar as contagens (06/10/2026, SQL Server Express local)
+- [x] Integração: forçar erro no meio da carga e conferir o rollback (primeira carga e reprocessamento)
+- [x] Atualizar os testes existentes que usam o payload ou as tabelas antigas (seção 8 da análise); `registro_legado` removida. Analytics e relatório usam dados em memória e acompanham a fase de analytics
 
 **Aceite:** `pytest` sem falhas; integração ignorada sem banco de teste configurado, como hoje.
+
+- [x] 06/10/2026: `162 passed` com banco de teste; `153 passed, 9 skipped` sem ele
 
 ---
 
@@ -357,11 +362,75 @@ GROUP BY P.codigo_parametro ORDER BY 1;
 - [x] Atualizar os documentos listados na seção 9 da análise (reescritos para a Parte 2: `modelagem-banco.md`, `contrato-dados.md`, `dicionario-dados.md`, `arquitetura.md`, os três diagramas e `README.md`; ajustados: `requisitos.md`, `analise-estatistica.md`)
 - [x] Preencher o relatório de cada fase na seção 11 da análise (fases 0 a 8 e 11)
 - [x] Revisão cruzada: README, arquitetura, diagramas, banco e manual (regras 9 a 11 do COPILOT.md)
-- [ ] Revisar de novo depois das fases 9 e 10 (primeira carga real e testes de integração)
+- [x] Revisado depois da fase 10 e do Analytics (06/10/2026)
+- [ ] Revisar de novo depois da primeira carga real (fase 9)
+
+---
+
+## Fase 12 — Decisões de Analytics (D9 a D11 bloqueiam as fases 14 e 16)
+
+Detalhes e recomendações na seção 10 da análise. Requisito: item 3.4 do [projeto_final.pdf](projeto_final.pdf) e critério 4 da seção 6 (logs comprovando a detecção de outliers).
+
+- [x] **D9** Indicador de alerta de qualidade só na análise (resultado, relatório/CSV e WARNING no log), sem mudança de schema (06/10/2026)
+- [x] **D10** Anômala se fora do IQR **ou** com |Z| > 3; o indicador informa `IQR`, `ZSCORE` ou `IQR+ZSCORE` (06/10/2026)
+- [x] **D11** CLI mostra todos os parâmetros da estação juntos, sem o menu de tipo (06/10/2026)
+
+---
+
+## Fase 13 — Leitura dos dados no modelo 3FN
+
+- [x] `LeituraRepository.get_medicoes(estacao_id=None, municipio_id=None, data_inicio=None, data_fim=None, codigos_parametro=None)`: uma linha por medição (`Leituras` + `Leitura_Itens` + `Parametros` + `Estacoes`), com estação, código e nome do parâmetro, unidade, data/hora, `codigo_registro` e valor; filtro por dia ou intervalo como hoje
+- [x] `MunicipioRepository`/`EstacaoRepository`: listar municípios com estação e estações por município (substituem `CidadeRepository.get_all` e `EstacaoRepository.get_estacao_cidade`)
+- [x] Remover as consultas legadas `get_leituras_*` de `LeituraRepository`, `get_estacao_cidade`, `CidadeRepository` e `CidadeModel`, atualizando usos e testes
+- [x] Testes unitários das consultas (SQL e parâmetros) e de integração com o dataset completo
+
+**Aceite:** nenhuma referência às tabelas `Cidades` ou às colunas largas de `Leituras` no código.
+
+- [x] 06/10/2026: conferido por busca no código; `integration/test_analytics.py` passa
+
+---
+
+## Fase 14 — Estatística e outliers por estação e parâmetro
+
+- [x] `AnaliticsService` reescrito sobre as medições da fase 13, agrupando por **estação + parâmetro** (os parâmetros vêm do banco, sem lista fixa no código; uma unidade por parâmetro, então não há mistura de unidades)
+- [x] Métricas: quantidade, média, mediana, desvio padrão, **variância**, Q1, Q3, **IQR**, mínimo e máximo
+- [x] Outliers pela regra IQR (`[Q1 − 1,5·IQR, Q3 + 1,5·IQR]`, mínimo de 4 valores, como hoje) e pelo **Z-Score** (regra da D10)
+- [x] Indicador de alerta de qualidade em cada medição anômala (forma definida na D9), com estação, parâmetro, data/hora, `codigo_registro`, valor, limites e Z-Score
+- [x] Outliers só sinalizados, nunca removidos (os fisicamente impossíveis já foram descartados na ingestão)
+- [x] Testes unitários: CT-04 e CT-05 adaptados, variância e IQR, Z-Score, amostra pequena, desvio zero (Z-Score indefinido), agrupamento por estação e parâmetro
+
+**Aceite:** com o dataset completo, métricas dos 11 parâmetros da estação e lista de outliers por IQR e Z-Score conferidas em `tests/test_quality_stat.py`.
+
+- [x] 06/10/2026: 1.824 anomalias (1.528 `IQR`, 296 `IQR+ZSCORE`); precipitação com IQR = 0 sinaliza toda chuva (ponto para o time)
+
+---
+
+## Fase 15 — Relatório, logs e consultas SQL
+
+- [x] `ReportService` com o formato novo (uma tabela de métricas por estação e parâmetro + tabela de anomalias com o indicador)
+- [x] Comando `python main.py --analise [--estacao CODIGO] [--inicio AAAA-MM-DD] [--fim AAAA-MM-DD]`: `gerar_relatorio()` adaptado, métricas em INFO e cada anomalia em WARNING no log da execução (critério 4 do enunciado: "logs comprovando a detecção de outliers")
+- [x] `sql/queries_analiticas.sql` (hoje vazio): agregações por estação e parâmetro com `GROUP BY` (contagem, média, desvio, mínimo, máximo, filtro por período), mediana/quartis com `PERCENTILE_CONT` e contagem por parâmetro
+- [x] Testes: formato do relatório, `--analise` no `main.py` e execução das consultas no banco de teste
+
+---
+
+## Fase 16 — CLI no modelo 3FN
+
+- [x] Fluxo Município → Estação → período → parâmetros (agrupamento conforme a D11) → métricas e anomalias
+- [x] Salvar CSV: criar a pasta `relatorios/` se não existir (hoje falha) e corrigir a mensagem exibida quando o usuário não salva
+- [x] Sem `print` (hoje `print("Saindo...")`); a CLI usa só `console.print`
+- [x] Testes do fluxo com entradas simuladas
+
+---
+
+## Fase 17 — Documentação de Analytics
+
+- [x] `analise-estatistica.md`: métricas, regras IQR e Z-Score, indicador de alerta e como executar
+- [x] `arquitetura.md`, diagramas, `README.md`, `manual-execucao.md` (comando `--analise`) e `plano-testes.md`
+- [x] Relatório das fases 12 a 17 na seção 11 da análise
 
 ---
 
 ## Fora deste TODO
 
-- Adaptar `analytics_service.py`, `report_service.py` e `src/cli` ao modelo `Leitura_Itens` + `Parametros` (vão quebrar após a fase 8)
-- Camadas Silver (Parquet/Snappy) e Gold (Star Schema)
+- **Data Lake (Bronze, Silver e Gold): não será implementado** (decisão de 06/10/2026). A pasta `data_lake/` fica só como estrutura.

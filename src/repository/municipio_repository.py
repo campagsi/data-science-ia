@@ -27,6 +27,23 @@ class MunicipioRepository:
             for linha in self.__database.fetch_all(query)
         ]
 
+    def get_com_estacoes(self) -> list[dict]:
+        """
+        Municípios que têm pelo menos uma estação, com a sigla do estado,
+        em ordem de nome: [{"id": ..., "nome": ..., "sigla": ...}].
+        """
+        query = """
+            SELECT M.id_municipio, M.nome, E.sigla
+            FROM dbo.Municipios AS M
+            INNER JOIN dbo.Estados AS E ON E.id_estado = M.estado_id
+            WHERE EXISTS (SELECT 1 FROM dbo.Estacoes AS S WHERE S.municipio_id = M.id_municipio)
+            ORDER BY M.nome, E.sigla
+        """
+        return [
+            {"id": linha[0], "nome": linha[1], "sigla": linha[2]}
+            for linha in self.__database.fetch_all(query)
+        ]
+
     def merge_many(
         self,
         municipios: list[MunicipioModel]

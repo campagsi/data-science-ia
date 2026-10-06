@@ -53,7 +53,7 @@ Seguindo o fluxo de `transform.py` do exemplo (proteção → regra de negócio 
 
 Como o dado em claro deixa de existir no registro depois do passo 3, nenhuma etapa posterior consegue gravá-lo no banco ou no log por engano.
 
-**Camada Bronze (outra frente do projeto):** a ingestão deste repositório não grava no Data Lake. Para quem implementar a Bronze: o enunciado (3.1) pede o JSON bruto em formato original, então os dados pessoais ficam em claro **somente** em `data_lake/bronze/`. Essa pasta tem acesso restrito, e os arquivos de dados dela não podem ir para o Git (só o `.gitkeep`). A partir da Silver e no banco relacional, apenas a versão anonimizada.
+**Camada Bronze (não implementada neste projeto):** a ingestão deste repositório não grava no Data Lake. Se ela vier a ser implementada: o enunciado (3.1) pede o JSON bruto em formato original, então os dados pessoais ficam em claro **somente** em `data_lake/bronze/`. Essa pasta tem acesso restrito, e os arquivos de dados dela não podem ir para o Git (só o `.gitkeep`). A partir da Silver e no banco relacional, apenas a versão anonimizada.
 
 ## Logs: módulo central `src/logger.py`
 

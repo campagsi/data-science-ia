@@ -188,4 +188,4 @@ A reexecução da ingestão para o mesmo período (backfill) **não duplica nada
 
 ## Consultas SQL do trabalho
 
-O enunciado pede consultas com `JOIN`, agregação por estação e filtro por período. O arquivo [sql/queries_analiticas.sql](../sql/queries_analiticas.sql) ainda está vazio. As consultas da análise estatística ainda leem o modelo antigo e serão reescritas sobre `Leituras` + `Leitura_Itens` + `Parametros` na fase de analytics. As consultas de conferência pós-carga (duplicidade, órfãos e faixas) estão na fase 9 do TODO.
+O enunciado pede consultas com `JOIN`, agregação por estação e filtro por período. Essas consultas estão em [sql/queries_analiticas.sql](../sql/queries_analiticas.sql), sobre `Leituras` + `Leitura_Itens` + `Parametros` + `Estacoes`: métricas por estação e parâmetro, quartis e limites IQR, anomalias com o indicador de alerta, volume por dia e medições por parâmetro. Os resultados batem com o relatório de `python main.py --analise` (teste de integração). As consultas de conferência pós-carga (duplicidade, órfãos e faixas) estão na fase 9 do TODO.

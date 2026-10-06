@@ -17,3 +17,6 @@ logs/
 data_lake/**
 !data_lake/**/
 !data_lake/**/.gitkeep
+
+# Relatórios CSV exportados pela CLI
+relatorios/

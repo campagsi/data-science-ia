@@ -30,7 +30,7 @@ flowchart TD
 	erro_banco --> fim_erro
 	banco -- Sim --> resumo[Registrar resumo da ingestao]
 
-	resumo --> analise[Analise estatistica e outliers - fase de analytics]
+	resumo --> analise[Analise estatistica: metricas e anomalias IQR ou Z-Score - python main.py --analise]
 	analise --> testes[Executar testes unitarios e validacoes]
 	testes --> testes_ok{Testes aprovados?}
 	testes_ok -- Nao --> corrigir[Corrigir codigo e repetir validacoes]
@@ -88,11 +88,11 @@ Parâmetros novos são cadastrados sem faixa. A validação devolve um resultado
 
 ### 6. Persistência no banco
 
-Os registros válidos são gravados numa única transação: municípios, operadores e estações por `MERGE`, e leituras e medições substituindo as partições estação + dia, sem duplicar ao reexecutar. Se o commit falhar, nada do lote fica gravado. Depois do commit, o resumo da execução é registrado no log. O Data Lake (Bronze, Silver e Gold) é tratado em outra frente do projeto.
+Os registros válidos são gravados numa única transação: municípios, operadores e estações por `MERGE`, e leituras e medições substituindo as partições estação + dia, sem duplicar ao reexecutar. Se o commit falhar, nada do lote fica gravado. Depois do commit, o resumo da execução é registrado no log. O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
 
 ### 7. Análise estatística
 
-Consulta os dados gravados, calcula métricas e identifica outliers. Está prevista para a fase de analytics, porque o código atual ainda lê o modelo da Parte 1 ([analise-estatistica.md](../analise-estatistica.md)).
+Executada à parte (`python main.py --analise` ou pela CLI), sobre as medições gravadas. Calcula média, mediana, desvio padrão, variância e IQR por estação + parâmetro e sinaliza como anômala a medição fora do IQR ou com \|Z\| > 3, com o indicador de alerta de qualidade. Cada anomalia vai numa linha `WARNING` do log; nada é removido ([analise-estatistica.md](../analise-estatistica.md)).
 
 ### 8. Testes e validação
 

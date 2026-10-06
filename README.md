@@ -4,7 +4,7 @@ O enunciado da Parte 1 está em [docs/projeto_modulo_1.md](docs/projeto_modulo_1
 
 ## Visão geral
 
-Pipeline de dados ambientais de estações de monitoramento: coleta as leituras por uma API REST, normaliza, anonimiza os dados pessoais dos operadores, valida cada registro, grava de forma idempotente num banco relacional 3FN (Azure SQL). Tudo o que não é importado fica registrado num log de rejeitados. O Data Lake (Bronze, Silver e Gold) é tratado em outra frente do projeto.
+Pipeline de dados ambientais de estações de monitoramento: coleta as leituras por uma API REST, normaliza, anonimiza os dados pessoais dos operadores, valida cada registro, grava de forma idempotente num banco relacional 3FN (Azure SQL). Tudo o que não é importado fica registrado num log de rejeitados. O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
 
 ## Fluxo principal
 
@@ -28,8 +28,9 @@ flowchart LR
 | Parâmetros | Parâmetro novo cadastrado automaticamente, sem faixa |
 | Validação | Um resultado por registro (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`); completude, acurácia, referência e unicidade |
 | Banco | Modelo 3FN mantido por SQL (DDL, migrations e DML); gravação idempotente por `MERGE` e substituição de partição estação + dia |
-| Data Lake | Em outra frente do projeto (a pasta `data_lake/` já existe na estrutura) |
-| Análise e relatório | Ainda no modelo da Parte 1; adaptação na fase de analytics |
+| Análise e relatório | Média, mediana, desvio padrão, variância e IQR por estação e parâmetro; anomalias por IQR ou Z-Score com indicador de alerta de qualidade, registradas em `WARNING` no log; consultas equivalentes em `sql/queries_analiticas.sql` |
+| CLI | Consulta por município → estação → período, com exportação em CSV |
+| Data Lake | Não será implementado (a pasta `data_lake/` fica só como estrutura) |
 
 O andamento por fase está em [docs/todo-idempotencia.md](docs/todo-idempotencia.md), e os relatórios em [docs/analise-implementacao.md](docs/analise-implementacao.md).
 
@@ -39,6 +40,7 @@ O andamento por fase está em [docs/todo-idempotencia.md](docs/todo-idempotencia
 pip install -r requirements.txt
 python -m uvicorn src.api.app:app          # API com o dataset (outro terminal)
 python main.py --ingestao                  # ingestão: banco + logs
+python main.py --analise                   # estatística e anomalias (log); filtros --estacao, --inicio, --fim
 python main.py                             # CLI de consulta
 python -m pytest tests                     # testes
 ```
@@ -83,7 +85,7 @@ Data-Science-Ia/
 │   ├── unit/                   # testes sem banco e sem rede
 │   ├── integration/            # SQL Server descartável; ignorados sem configuração
 │   └── test_quality_stat.py    # testes de qualidade e estatística
-├── main.py                     # inicialização, CLI e ingestão (python main.py --ingestao)
+├── main.py                     # inicialização, CLI, ingestão (--ingestao) e análise (--analise)
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -101,9 +103,9 @@ Esta visão geral está alinhada com os documentos detalhados do projeto:
 - [docs/contrato-dados.md](docs/contrato-dados.md) — contrato do JSON de entrada e regras de normalização
 - [docs/dicionario-dados.md](docs/dicionario-dados.md) — tipos, unidades e regras dos campos
 - [docs/requisitos.md](docs/requisitos.md) — requisitos funcionais e regras de negócio
-- [docs/analise-estatistica.md](docs/analise-estatistica.md) — métricas, agrupamentos e outliers
+- [docs/analise-estatistica.md](docs/analise-estatistica.md) — métricas, regras IQR e Z-Score, indicador de alerta e como executar
 - [docs/analise-implementacao.md](docs/analise-implementacao.md) — o que muda com o novo banco 3FN (Parte 2) e relatórios de implementação por fase
-- [docs/todo-idempotencia.md](docs/todo-idempotencia.md) — fases de idempotência, campos nulos e log de rejeitados
+- [docs/todo-idempotencia.md](docs/todo-idempotencia.md) — fases de idempotência, campos nulos, log de rejeitados e Analytics
 - [docs/plano-testes.md](docs/plano-testes.md) — estratégia e cenários de teste
 - [docs/seguranca-lgpd.md](docs/seguranca-lgpd.md) — tratamento de dados e credenciais
 - [docs/versionamento.md](docs/versionamento.md) — branches e evolução do contrato
@@ -128,8 +130,8 @@ Cada registro da API é um ciclo de leitura de uma estação: estado, município
 - O banco `impacta` está igual ao DDL, com as migrations V001 e V002 e o DML de domínio (27 estados e 11 parâmetros) aplicados.
 - A ingestão foi validada no banco real com o dataset completo carregado duas vezes, dentro de uma transação desfeita ao final: 9.806 leituras e 104.582 medições, sem nenhuma duplicidade.
 - **Próximos passos:**
-  - primeira carga real e conferência no banco (fase 9);
-  - reescrita dos testes de integração (fase 10);
-  - adaptação da análise e da CLI ao modelo 3FN;
-  - camadas Silver e Gold.
+  - primeira carga real e conferência no banco `impacta` (fase 9; as conferências já passam nos testes de integração);
+  - decisão do time sobre a regra IQR na precipitação (IQR = 0 sinaliza toda chuva; ver [docs/analise-estatistica.md](docs/analise-estatistica.md)).
+- Analytics no modelo 3FN concluído (fases 12 a 17): 1.824 anomalias no dataset atual, conferidas contra o SQL no banco de teste.
+- O Data Lake não será implementado neste repositório.
 - A aplicação usa Azure SQL; o enunciado da Parte 1 citava SQLite ou PostgreSQL.
