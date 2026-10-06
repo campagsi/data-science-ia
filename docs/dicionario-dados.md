@@ -35,7 +35,7 @@ Campos do payload da API (`src/api/data_set.json`), o tipo depois da normalizaç
 
 ## Medições (11 parâmetros no payload atual)
 
-Para cada parâmetro `X`: `X` → `Leitura_Itens.valor`; `X_tipo_codigo` → `Parametros.codigo_parametro`; `X_unidade_medida` → `Parametros.unidade_medida`. `X_codigo` e `data_hora_leitura_X` são descartados. As faixas vêm do `sql/dml_populacao.sql` (decisão D6, proposta aguardando validação do time).
+Para cada parâmetro `X`: `X` → `Leitura_Itens.valor`; `X_tipo_codigo` → `Parametros.codigo_parametro`; `X_unidade_medida` → `Parametros.unidade_medida`. `X_codigo` e `data_hora_leitura_X` são descartados. As faixas vêm do `sql/dml_populacao.sql` (decisão D6, aprovada em 06/10/2026).
 
 | Campo `X` | Código (`X_tipo_codigo`) | Nome em `Parametros` | Unidade | Faixa válida |
 |---|---|---|---|---|

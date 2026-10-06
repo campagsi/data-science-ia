@@ -61,6 +61,8 @@ Critérios:
 - transformar os dados em registros utilizáveis pelo sistema;
 - identificar falhas quando a fonte estiver indisponível ou retornar dados inválidos.
 
+Implementado na Parte 2 (item 3.1 do projeto final): Nova tentativa com espera crescente (1 s, 2 s, 4 s; 4 tentativas) para queda de conexão, timeout, HTTP 5xx e 429 (respeitando `Retry-After`), no máximo 30 requisições por minuto, resposta vazia tratada como lote vazio (`WARNING`) e falha definitiva como `FonteIndisponivelError` (`ERROR` e depois `CRITICAL`).
+
 ### RF03 - Validação de integridade dos dados
 O sistema deve interpretar o JSON e tratar inconsistências da carga inicial, incluindo campos ausentes ou nulos, antes da persistência.
 

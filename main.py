@@ -25,36 +25,86 @@ from src.services.report_service import ReportService
 from src.services.validation_service import ValidationService
 
 
+# Chaves do resumo da ingestão, na ordem em que aparecem no log.
+_CAMPOS_RESUMO = (
+    "recebidos",
+    "rejeitados_na_normalizacao",
+    "registros_validos",
+    "registros_invalidos",
+    "itens_descartados",
+    "leituras_gravadas",
+    "leituras_substituidas",
+    "itens_gravados",
+)
+
+
 def run_pipeline() -> dict[str, int]:
     """
     Executa a ingestão: coleta, normalização, cadastro de parâmetros, validação
     e gravação idempotente no banco. Devolve o resumo da execução.
+
+    Nenhum registro chega ao banco sem passar pela validação (etapa 5), e nada
+    do que é recusado se perde: tudo vai para o log de rejeitados (etapa 6).
     """
+    # 1. Coleta: busca o lote bruto (JSON) na API configurada em FONTE_DADOS,
+    #    com novas tentativas para queda de conexão, 5xx e 429 e limite de
+    #    requisições por minuto. Lote vazio encerra aqui, sem tocar no banco.
     settings = load_config()
     raw_data = DataClient(settings).fetch_data()
+    if not raw_data:
+        resumo = dict.fromkeys(_CAMPOS_RESUMO, 0)
+        registrar_resumo(**resumo)
+        return resumo
+
+    # 2. Tratamento: texto vazio vira None, números e datas são convertidos,
+    #    cada registro vira cabeçalho + itens (um por parâmetro) e CPF, nome e
+    #    e-mail do operador são anonimizados. Valor que não pode ser convertido
+    #    é rejeitado e logado aqui, sem derrubar o lote; medição vazia segue
+    #    como None para a validação decidir.
     normalized_data = NormalizationService().normalize(raw_data)
 
     # O schema é mantido por sql/ddl_banco_relacional.sql e sql/migrations/.
     database = DatabaseConnection(settings.azure_sql_connectionstring)
 
-    # Parâmetros novos são cadastrados antes da validação, que usa as faixas de
-    # Parametros e as siglas de Estados lidas do banco.
+    # 3. Parâmetros: os encontrados no lote (*_tipo_codigo) e ainda não
+    #    cadastrados são inseridos em Parametros, sem faixa. Volta o mapa
+    #    código → parâmetro aceito, com id e faixa de valores.
     parametros = ParametroService(ParametroRepository(database)).sincronizar(
         NormalizationService.descobrir_parametros(normalized_data)
     )
+
+    # 4. Referência: siglas de Estados, para conferir o estado de cada leitura.
     siglas = {estado.sigla for estado in EstadoRepository(database).get_all()}
+
+    # 5. Validação, antes de qualquer gravação. Não grava nem loga: devolve um
+    #    resultado por registro (valido, campos_nulos, itens_invalidos, motivos).
+    #    - completude: campo vital nulo rejeita a leitura; medição nula descarta
+    #      só o item; leitura sem nenhuma medição válida é rejeitada;
+    #    - acurácia: valor fora da faixa do parâmetro descarta só o item;
+    #    - referência e validade: estado inexistente ou sigla inválida;
+    #    - unicidade: registro repetido no lote e cadastro divergente.
     resultados = ValidationService(
         faixas=ParametroService.faixas(parametros),
         siglas_estados=siglas,
         parametros_validos=set(parametros),
     ).validate_data(normalized_data)
+
+    # 6. Log de rejeitados a partir dos resultados: uma linha por leitura
+    #    recusada e uma por medição descartada (sem dado pessoal).
     validacao = registrar_resultados_validacao(resultados)
+
+    # 7. Filtro: só os registros com valido=True, já sem os itens descartados.
     validated_data = ValidationService.registros_validos(resultados)
 
+    # 8. Gravação idempotente, numa única transação: municípios, operadores e
+    #    estações por MERGE; leituras e itens substituindo as partições
+    #    estação + dia. Reexecutar o mesmo período não duplica; se algo falhar,
+    #    nada do lote fica gravado.
     gravacao = LeituraRepository(database).save_readings(
         validated_data, parametros, settings.fonte_dados
     )
 
+    # 9. Resumo da execução no log (e retorno da função).
     resumo = {
         "recebidos": len(raw_data),
         "rejeitados_na_normalizacao": len(raw_data) - len(normalized_data),

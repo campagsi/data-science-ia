@@ -183,7 +183,7 @@ A reexecução da ingestão para o mesmo período (backfill) **não duplica nada
 
 - O banco `impacta` está igual ao DDL, com as migrations `V001` (`codigo_registro`) e `V002` (`email_criptografado`) aplicadas.
 - O DML de domínio foi aplicado: 27 estados e 11 parâmetros.
-- Até a primeira carga real (fase 9 do [TODO](todo-idempotencia.md)), `Municipios`, `Operadores`, `Estacoes`, `Leituras` e `Leitura_Itens` estão vazias.
+- Primeira carga real em 06/10/2026 (fase 9 do [TODO](todo-idempotencia.md)): 1 município, 1 estação, 1 operador, 9.806 leituras e 104.582 itens. Os `id_leitura` não começam em 1 porque os testes da fase 8, desfeitos com rollback, consumiram valores do `IDENTITY` (o SQL Server não devolve esses valores), e cada reprocessamento gera ids novos para as partições substituídas.
 - O banco ainda tem a tabela `dbo.sysdiagrams`, criada pelo SSMS, que não interfere.
 
 ## Consultas SQL do trabalho

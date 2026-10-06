@@ -6,7 +6,7 @@ Define o formato dos dados que entram no sistema, as regras de normalização e 
 
 ## 2. Origem dos dados
 
-O pipeline obtém os dados exclusivamente pela API REST configurada em `FONTE_DADOS`, no endpoint `GET {FONTE_DADOS}/api/v1/data-set`. No ambiente atual, essa API é o serviço FastAPI do projeto (`src/api`), que serve o arquivo `src/api/data_set.json`. A resposta precisa ser uma lista de objetos JSON; caso contrário, a coleta falha (`DataClient.fetch_data`).
+O pipeline obtém os dados exclusivamente pela API REST configurada em `FONTE_DADOS`, no endpoint `GET {FONTE_DADOS}/api/v1/data-set`. No ambiente atual, essa API é o serviço FastAPI do projeto (`src/api`), que serve o arquivo `src/api/data_set.json`. A resposta precisa ser uma lista de objetos JSON; caso contrário, a coleta falha (`DataClient.fetch_data`). Nova tentativa com espera crescente (1 s, 2 s, 4 s; 4 tentativas) para queda de conexão, timeout, HTTP 5xx e 429 (respeitando `Retry-After`), no máximo 30 requisições por minuto, resposta vazia tratada como lote vazio (`WARNING`) e falha definitiva como `FonteIndisponivelError` (`ERROR` e depois `CRITICAL`).
 
 ## 3. Estrutura de entrada
 

@@ -61,7 +61,7 @@ sequenceDiagram
 
 ### 2. Coleta (`data_client.py`)
 
-`fetch_data()` busca `GET {FONTE_DADOS}/api/v1/data-set` e exige uma lista de objetos.
+`fetch_data()` busca `GET {FONTE_DADOS}/api/v1/data-set` e exige uma lista de objetos. Nova tentativa com espera crescente (1 s, 2 s, 4 s; 4 tentativas) para queda de conexão, timeout, HTTP 5xx e 429 (respeitando `Retry-After`), no máximo 30 requisições por minuto, resposta vazia tratada como lote vazio (`WARNING`) e falha definitiva como `FonteIndisponivelError` (`ERROR` e depois `CRITICAL`). Com lote vazio, a `run_pipeline()` registra o resumo zerado e termina sem abrir conexão com o banco.
 
 ### 3. Normalização e anonimização (`normalization_service.py`)
 

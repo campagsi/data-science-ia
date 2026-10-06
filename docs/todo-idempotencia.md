@@ -51,11 +51,11 @@ GROUP BY i.object_id, i.name, i.is_unique;
 Detalhes e recomendações na seção 10 da análise.
 
 - [x] **D1** Chave natural de `Leituras`: `codigo_registro` + `UNIQUE` (aprovada em 05/10/2026)
-- [ ] **D2** Leitura sem operador (recomendado: rejeitar e logar)
+- [x] **D2** Leitura sem operador: rejeitar e logar (06/10/2026)
 - [x] **D3** `Leituras.fonte` = `FONTE_DADOS` (URL da API), variável única que substitui `MOCK_API` (05/10/2026)
 - [x] **D4** Mudança do `ValidationService` para rejeição por registro e por item (aprovada em 05/10/2026)
-- [ ] **D5** Campos do payload sem coluna no DDL (recomendado: descartar por ora)
-- [ ] **D6** Faixas mínima e máxima dos parâmetros (proposta na fase 3)
+- [x] **D5** Campos do payload sem coluna no DDL: descartar (06/10/2026)
+- [x] **D6** Faixas mínima e máxima dos parâmetros: proposta da fase 3 aprovada (06/10/2026)
 - [x] **D7** E-mail criptografado: `email_hash` trocado por `email_criptografado VARCHAR(255) NULL` (aprovada em 05/10/2026)
 - [x] **D8** Hash com pepper: configurável (`PEPPER_HASH` preenchido = HMAC-SHA256; vazio = SHA-256 puro), fase 2
 - [x] D1 = (a) e D7 = (a): migrations `V001` e `V002` criadas em `sql/migrations/`, DDL atualizado, aplicadas no banco `impacta` (duas vezes, para provar a idempotência) e Fase 0 repetida. Ações originais:
@@ -119,7 +119,7 @@ Desenho em [seguranca-lgpd.md](seguranca-lgpd.md) e na seção 6 da análise.
 - [x] Uma execução gera os dois arquivos de log no formato definido (testado)
 - [x] Valores de campos pessoais nunca entram no log de rejeitados (testado)
 - [x] Leituras importadas + rejeitadas = total recebido (testado na integração, fase 9)
-- [ ] Busca por CPF, nome ou e-mail em `logs/` após uma carga real → testado na integração; falta a carga real (fase 9)
+- [x] Busca por CPF, nome ou e-mail em `logs/` após uma carga real: nenhum encontrado (06/10/2026)
 
 ---
 
@@ -132,7 +132,7 @@ Desenho em [seguranca-lgpd.md](seguranca-lgpd.md) e na seção 6 da análise.
 - [x] Testes de integração passam a montar o banco com o DDL + migrations
 - [x] Escrever [sql/dml_populacao.sql](../sql/dml_populacao.sql) **idempotente** (`MERGE` pela chave natural, que insere o que falta e atualiza o que mudou):
   - [x] 27 estados (`sigla`, `nome`)
-  - [x] 11 parâmetros conhecidos com faixas (D6, **proposta aplicada; aguardando validação do time**):
+  - [x] 11 parâmetros conhecidos com faixas (D6, **proposta aprovada em 06/10/2026**):
 
 | codigo_parametro | nome | unidade | mín. | máx. | origem da faixa |
 |---|---|---|---|---|---|
@@ -335,7 +335,7 @@ GROUP BY P.codigo_parametro ORDER BY 1;
 - [x] Conferir: itens por parâmetro no banco + itens rejeitados do parâmetro = leituras gravadas (testado)
 - [x] Backfill: rodar só uma data histórica e confirmar que só aquela partição muda (testado)
 - [x] Logs de testes isolados de `logs/` (`PASTA_LOGS`), para a pasta guardar só a carga real
-- [ ] **Carga real no banco `impacta`**: duas execuções de `python main.py --ingestao` + as consultas acima + busca por CPF, nome e e-mail em `logs/`. **Bloqueado:** liberar o IP da máquina no firewall do Azure SQL
+- [x] **Carga real no banco `impacta`** (06/10/2026): duas execuções de `python main.py --ingestao` com contagens idênticas, consultas acima vazias, 9.806 + 82 = 9.888, itens + rejeitados = 9.806 por parâmetro, nenhum CPF, nome ou e-mail em `logs/` e backfill de 10/07/2026 mudando só aquela partição
 
 ---
 
@@ -363,7 +363,7 @@ GROUP BY P.codigo_parametro ORDER BY 1;
 - [x] Preencher o relatório de cada fase na seção 11 da análise (fases 0 a 8 e 11)
 - [x] Revisão cruzada: README, arquitetura, diagramas, banco e manual (regras 9 a 11 do COPILOT.md)
 - [x] Revisado depois da fase 10 e do Analytics (06/10/2026)
-- [ ] Revisar de novo depois da primeira carga real (fase 9)
+- [x] Revisado depois da primeira carga real (06/10/2026)
 
 ---
 
@@ -374,6 +374,7 @@ Detalhes e recomendações na seção 10 da análise. Requisito: item 3.4 do [pr
 - [x] **D9** Indicador de alerta de qualidade só na análise (resultado, relatório/CSV e WARNING no log), sem mudança de schema (06/10/2026)
 - [x] **D10** Anômala se fora do IQR **ou** com |Z| > 3; o indicador informa `IQR`, `ZSCORE` ou `IQR+ZSCORE` (06/10/2026)
 - [x] **D11** CLI mostra todos os parâmetros da estação juntos, sem o menu de tipo (06/10/2026)
+- [x] **D12** Precipitação com IQR = 0: manter a regra e documentar a limitação (06/10/2026)
 
 ---
 
@@ -428,6 +429,19 @@ Detalhes e recomendações na seção 10 da análise. Requisito: item 3.4 do [pr
 - [x] `analise-estatistica.md`: métricas, regras IQR e Z-Score, indicador de alerta e como executar
 - [x] `arquitetura.md`, diagramas, `README.md`, `manual-execucao.md` (comando `--analise`) e `plano-testes.md`
 - [x] Relatório das fases 12 a 17 na seção 11 da análise
+
+---
+
+## Fase 18 — Consumo resiliente da API (item 3.1 do enunciado)
+
+Lacuna encontrada na revisão de 06/10/2026: previsto na seção 7 da análise, mas sem fase no TODO.
+
+- [x] `DataClient.fetch_data()`: nova tentativa com espera crescente para queda de conexão, timeout, HTTP 5xx e 429; `Retry-After` respeitado
+- [x] Rate limiting: no máximo 30 requisições por minuto, contando as novas tentativas
+- [x] Resposta vazia (corpo vazio ou `[]`): `WARNING` e lote vazio; a `run_pipeline()` encerra com resumo zerado, sem abrir conexão com o banco
+- [x] Erro 4xx e resposta fora do contrato (JSON inválido, não lista, registro que não é objeto): falha sem nova tentativa
+- [x] Tentativas esgotadas: `ERROR` no log e `FonteIndisponivelError` (o `main.py` registra `CRITICAL` e sai com código 1)
+- [x] Testes com relógio simulado (sem esperar de verdade) e teste manual com a API local fora e dentro do ar
 
 ---
 

@@ -248,7 +248,7 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 | `src/database/criar_tabelas.py` | **Removido** (criava o modelo antigo). O schema vem do DDL e das migrations. |
 | `sql/migrations/` (novo) | Uma migration idempotente `VNNN__descricao.sql` por mudança de estrutura; o DDL é atualizado na mesma entrega. Aplicadas: `V001__leituras_codigo_registro.sql` (D1) e `V002__operadores_email_criptografado.sql` (D7). |
 | [src/database/connection.py](../src/database/connection.py) | `insert_em_lotes()` (fase 8): `INSERT` de várias linhas por comando, respeitando o limite de parâmetros do SQL Server. |
-| [src/ingestion/data_client.py](../src/ingestion/data_client.py) | Adicionar tratamento de queda de conexão, resposta vazia e rate limit, com logs (padrão de `extrair_dados_api`). |
+| [src/ingestion/data_client.py](../src/ingestion/data_client.py) | **Fase 18:** tratamento de queda de conexão, resposta vazia e rate limit, com logs (padrão de `extrair_dados_api`). |
 | [src/ingestion/importar_dados.py](../src/ingestion/importar_dados.py) | **Reescrito na fase 8:** `importar_municipios`, `importar_operadores`, `importar_estacoes` e `importar_leituras`, cada uma idempotente e devolvendo o mapa chave → id. Plano original: reescrita para a nova ordem: Estados (busca) → Municípios → Operadores → Estações → Parâmetros → Leituras/Itens (por partição). Os caches `__cidades`, `__operadores` e `__estacoes` passam a ser municípios, operadores, estações e parâmetros. |
 | [src/services/normalization_service.py](../src/services/normalization_service.py) | **Reescrito na fase 4:** payload novo, cabeçalho + itens, descoberta de parâmetros, anonimização e minimização, rejeição por item ou leitura sem derrubar o lote. |
 | [src/services/validation_service.py](../src/services/validation_service.py) | **Reescrito nas fases 5 e 6:** um resultado por registro (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`, `registro`; contrato na seção 4), sem abortar o lote. Faixas, siglas e parâmetros aceitos recebidos no construtor; a `run_pipeline()` os lê do banco desde a fase 7. |
@@ -294,14 +294,15 @@ Precisam de resposta antes da fase correspondente do TODO.
 | # | Decisão | Opções | Recomendação |
 |---|---|---|---|
 | D1 | Chave natural de `Leituras` (o DDL não tem nenhuma) | (a) nova coluna `codigo_registro VARCHAR(50) NOT NULL` + `UNIQUE`; (b) `UNIQUE (estacao_id, data_hora)` | **Aprovada (a) em 05/10/2026; migration V001.** é o identificador do enunciado ("Identificador do Pedido/Leitura") e vem pronto no payload. Exige alterar o DDL e o banco. |
-| D2 | Leitura com estação mas **sem operador** (32 registros) | (a) rejeitar; (b) `operador_id` passa a aceitar `NULL`; (c) operador "NÃO INFORMADO" | **(a)**, que mantém o DDL; os 32 vão para o log de rejeitados. |
+| D2 | Leitura com estação mas **sem operador** (32 registros) | (a) rejeitar; (b) `operador_id` passa a aceitar `NULL`; (c) operador "NÃO INFORMADO" | **Aprovada (a) em 06/10/2026**: mantém o DDL; os 32 vão para o log de rejeitados. |
 | D3 | `Leituras.fonte` é `NOT NULL` e o payload não traz fonte | (a) constante, ex.: `API_MOCK`; (b) URL da API; (c) campo no `.env` | **Definida em 05/10/2026: uma variável só, `FONTE_DADOS`, com a URL da API.** Ela substitui a antiga `MOCK_API`: é usada na coleta e gravada em `Leituras.fonte` (máximo de 100 caracteres, conferido no `load_config()`). |
 | D4 | `ValidationService.validate_data` aborta o lote inteiro | Alterar para rejeição por registro e por item | **Aprovada em 05/10/2026**: o CLAUDE.md passou a permitir alteração de lógica na Parte 2. Necessária para "salvar log de tudo que não foi importado". |
-| D5 | Campos do payload sem coluna no DDL: `cidade_codigo`, `estacao_ativa`, `estacao_tipo`, `operador_ativo`, `<param>_codigo`, `data_hora_leitura_<param>` | (a) descartar; (b) adicionar colunas | **(a)** por ora, registrando no `INFO` de resumo. Reavaliar `data_hora_leitura_<param>` (hora exata de cada medição) para a Gold. |
-| D6 | Faixas de `valor_minimo`/`valor_maximo` dos 11 parâmetros | Proposta no TODO (fase 3) | **Proposta aplicada no `dml_populacao.sql` em 05/10/2026, aguardando validação do time.** pH 0–14 e umidade 0–100 vêm do enunciado e do código atual. Para mudar, basta editar o DML e reexecutá-lo (`MERGE` atualiza as faixas). |
+| D5 | Campos do payload sem coluna no DDL: `cidade_codigo`, `estacao_ativa`, `estacao_tipo`, `operador_ativo`, `<param>_codigo`, `data_hora_leitura_<param>` | (a) descartar; (b) adicionar colunas | **Aprovada (a) em 06/10/2026**: listados uma vez por lote em `INFO`, sem gravar. |
+| D6 | Faixas de `valor_minimo`/`valor_maximo` dos 11 parâmetros | Proposta no TODO (fase 3) | **Aprovada em 06/10/2026 a proposta aplicada no `dml_populacao.sql`.** pH 0–14 e umidade 0–100 vêm do enunciado e do código atual. Para mudar, basta editar o DML e reexecutá-lo (`MERGE` atualiza as faixas). |
 | D7 | Onde gravar o e-mail criptografado: `email_hash VARCHAR(64)` não comporta um token Fernet (cerca de 140 caracteres para um e-mail comum) | (a) trocar `email_hash` por `email_criptografado VARCHAR(255) NULL`; (b) manter `email_hash` e adicionar `email_criptografado`; (c) só hash, sem recuperação | **Aprovada (a) em 05/10/2026; migration V002.** segue o exemplo `security.py` e o item 3.2 do enunciado (reversível para dado que exige recuperação). Exige alterar o DDL e o banco, junto com a D1. |
 | D9 | Indicador de alerta de qualidade das leituras anômalas (PDF 3.4) | (a) só no resultado da análise, no relatório/CSV e em WARNING no log; (b) coluna `alerta_qualidade` em `Leitura_Itens`, atualizada pela análise (migration) | **Aprovada (a) em 06/10/2026.** O outlier depende do recorte analisado (estação, período); gravado no banco ficaria desatualizado a cada carga. A Gold, onde caberia, não será implementada. |
 | D10 | Regra do Z-Score | (a) anômala se fora do IQR **ou** com \|Z\| > 3, indicador informando o(s) método(s) (`IQR`, `ZSCORE`, `IQR+ZSCORE`); (b) anômala só se fora do IQR **e** \|Z\| > 3 (Z-Score confirma o IQR); (c) limite \|Z\| > 2 | **Aprovada (a) em 06/10/2026**, com \|Z\| > 3: mostra o resultado de cada método sem esconder nenhum; o indicador diz qual sinalizou. |
+| D12 | Precipitação com IQR = 0 (maioria 0 mm): toda chuva acima de zero vira anomalia `IQR` (1.210 dos 1.824 alertas) | (a) manter a regra e documentar; (b) IQR só sobre os valores positivos quando IQR = 0; (c) só Z-Score quando IQR = 0 | **Aprovada (a) em 06/10/2026**: mesma regra para todos os parâmetros; a limitação fica documentada em `analise-estatistica.md`. |
 | D11 | Agrupamento dos parâmetros na CLI (`Parametros` não tem grupo) | (a) mostrar todos os parâmetros da estação juntos (sem o menu de tipo); (b) grupo fixo no código por código de parâmetro; (c) coluna `grupo` em `Parametros` (migration + DML) | **Aprovada (a) em 06/10/2026**: não exige schema nem lista fixa e funciona para parâmetros novos. |
 | D8 | Hash de CPF e nome com pepper | (a) SHA-256 puro, como no exemplo; (b) SHA-256 de `PEPPER_HASH` + valor | **Implementada configurável na fase 2** (`PEPPER_HASH` preenchido = HMAC-SHA256). Recomendação mantida: (b). o CPF tem só 10¹¹ combinações e o SHA-256 puro pode ser revertido por força bruta. Mantém os 64 caracteres. |
 
@@ -490,8 +491,17 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 
 ### Fase 9 — Validação do banco após a carga
 
-- **Status:** conferências automatizadas e aprovadas no banco de teste (06/10/2026); **carga real no banco `impacta` bloqueada**.
-- **Bloqueio:** o firewall do Azure SQL recusa o IP atual da máquina. Liberar o IP no portal (servidor `impacta` → *Networking*) e então rodar `python main.py --ingestao` duas vezes e as consultas do TODO.
+- **Status:** concluída em 06/10/2026, no banco de teste e no banco `impacta`.
+- **Carga real** (depois da liberação do IP no firewall do Azure SQL; API local em `FONTE_DADOS`):
+  - antes: só `Estados` = 27 e `Parametros` = 11;
+  - 1ª execução de `python main.py --ingestao` (≈18 s): `recebidos=9888 registros_validos=9806 registros_invalidos=82 itens_descartados=3284 leituras_gravadas=9806 itens_gravados=104582`; 1 município, 1 estação, 1 operador;
+  - 2ª execução: `leituras_substituidas=9806`, contagens, itens por parâmetro e partições (206 dias) idênticos; só os `id_leitura` mudaram, como esperado na substituição;
+  - consultas de duplicidade, leitura sem item, item fora da faixa e hash/e-mail: todas vazias nas duas execuções;
+  - log de rejeitados com 3.366 linhas: 9.806 leituras no banco + 82 rejeitadas = 9.888; por parâmetro, itens gravados + rejeitados = 9.806 nos 11;
+  - nenhum CPF, nome ou e-mail do dataset em `logs/`;
+  - backfill: `run_pipeline()` só com os 48 registros de 10/07/2026 (47 válidos) regravou as 47 leituras daquele dia com ids novos; as outras 9.759 mantiveram os ids, e os 104.582 itens (registro, parâmetro, valor) ficaram idênticos;
+  - `python main.py --analise` no banco real: 1.824 linhas `WARNING` de alerta (1.528 `IQR`, 296 `IQR+ZSCORE`), igual ao banco de teste.
+- **Observação:** os `id_leitura` começam em 19.613 porque os testes da fase 8, desfeitos com rollback, consumiram valores do `IDENTITY`.
 - **Coberto pelos testes de integração** (SQL Server Express local, dataset completo):
   - duas execuções seguidas da `run_pipeline()`: mesmo resumo e mesmas contagens; a 2ª substitui as 9.806 leituras;
   - todas as consultas de duplicidade, órfãos, faixa e hash/e-mail voltam vazias;
@@ -581,3 +591,25 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 - `analise-estatistica.md` reescrito (métricas, regras, indicador, como executar, resultado e limitação da precipitação).
 - Ajustados: `README.md`, `arquitetura.md`, `manual-execucao.md` (`--analise` e CLI), `requisitos.md` (RF06 a RF08), `modelagem-banco.md` (consultas analíticas), `contrato-dados.md` e `seguranca-lgpd.md` (Data Lake fora do escopo), os três diagramas (sequência da análise em `diagrama-sequencia.md`) e `plano-testes.md` (CT-14, CT-15, arquivos e contagens).
 - **Validação:** `183 passed, 18 skipped` sem banco de teste; `201 passed` com o SQL Server Express local; nenhuma referência restante a `CidadeRepository`, `get_leituras_*`, "fase de analytics" ou "outra frente" fora deste histórico.
+
+### Fase 18 — Consumo resiliente da API
+
+- **Status:** concluída em 06/10/2026.
+- **Origem:** o item 3.1 do enunciado ("tratamento de erros para queda de conexão, respostas vazias e controle de limite de requisições por minuto") estava previsto na seção 7, mas não tinha fase no TODO. O `DataClient` fazia um único `GET`, sem nova tentativa nem log.
+- **`src/ingestion/data_client.py`:**
+  - até 4 tentativas com espera crescente (1 s, 2 s, 4 s) para `ConnectionError`, `Timeout`, HTTP 500, 502, 503, 504 e 429; no 429, espera o maior entre o backoff e o `Retry-After`;
+  - limite de 30 requisições por minuto (intervalo mínimo de 2 s entre requisições, contando as novas tentativas);
+  - corpo vazio ou lista vazia: `WARNING` e lote vazio; JSON inválido, resposta que não é lista ou registro que não é objeto: `ValueError`; 4xx: `HTTPError`, sem nova tentativa;
+  - tentativas esgotadas: `ERROR` no log e `FonteIndisponivelError`;
+  - `INFO` com a quantidade de registros recebidos;
+  - tentativas, espera, limite, `dormir` e `relogio` injetáveis no construtor (padrões nas constantes do módulo), para testar sem esperar.
+- **`main.py`:** lote vazio encerra a `run_pipeline()` logo após a coleta, com o resumo zerado e sem conexão com o banco (`_CAMPOS_RESUMO`).
+- **Decisão:** valores fixos no código (4 tentativas, 1 s, 30/min), sem variável de ambiente nova, porque a API atual é local e não informa limite. Se uma API externa exigir outro limite, basta mudar as constantes.
+- **Validação:** `unit/test_data_client.py` (18 testes: novas tentativas por tipo de falha, esgotamento, `Retry-After`, espaçamento pelo limite por minuto, 4xx sem nova tentativa, respostas vazias e fora do contrato) e `test_lote_vazio_encerra_sem_tocar_no_banco`; manual: API fora do ar = 4 tentativas e `FonteIndisponivelError` em ≈15 s; API no ar = 9.888 registros em 0,4 s. `196 passed, 18 skipped` sem banco de teste.
+
+### Decisões finais (06/10/2026)
+
+- D2, D5 e D6 aprovadas como recomendadas, sem mudança de código: leitura sem operador é rejeitada e logada; campos sem coluna são descartados; as faixas do `dml_populacao.sql` ficam valendo.
+- D12 (nova): a regra IQR é mantida também na precipitação; a limitação está documentada.
+- Pendente só a tarefa operacional do time: gerar e compartilhar uma única `CHAVE_CRIPTOGRAFIA` e um único `PEPPER_HASH`.
+

@@ -171,6 +171,16 @@ def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
     }
 
 
+def test_lote_vazio_encerra_sem_tocar_no_banco(pipeline_falso, monkeypatch):
+    monkeypatch.setattr(main.DataClient, "fetch_data", lambda self: [])
+
+    resumo = main.run_pipeline()
+
+    assert pipeline_falso == ["configuração"]
+    assert set(resumo) == set(main._CAMPOS_RESUMO)
+    assert set(resumo.values()) == {0}
+
+
 def test_run_pipeline_nao_executa_a_analise(pipeline_falso):
     main.run_pipeline()
 

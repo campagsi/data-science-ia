@@ -55,7 +55,7 @@ GO
    codigo_parametro = valor de <param>_tipo_codigo no payload.
    valor_minimo / valor_maximo: faixa de validade física usada na validação
    de acurácia (fase 6). NULL = sem limite. Decisão D6 em
-   docs/analise-implementacao.md: faixas marcadas "proposta" aguardam o time.
+   docs/analise-implementacao.md: faixas aprovadas pelo time em 06/10/2026.
    Parâmetros novos são cadastrados pelo pipeline (fase 7), com faixa NULL.
 ========================================= */
 

@@ -48,7 +48,7 @@ Os tamanhos e as faixas dos campos seguem o DDL, então um valor que o banco rec
 
 | Serviço | Responsabilidade |
 |---|---|
-| `src/ingestion/data_client.py` | Coleta o lote em `GET {FONTE_DADOS}/api/v1/data-set`. |
+| `src/ingestion/data_client.py` | Coleta o lote em `GET {FONTE_DADOS}/api/v1/data-set`. Nova tentativa com espera crescente (1 s, 2 s, 4 s; 4 tentativas) para queda de conexão, timeout, HTTP 5xx e 429 (respeitando `Retry-After`), no máximo 30 requisições por minuto, resposta vazia tratada como lote vazio (`WARNING`) e falha definitiva como `FonteIndisponivelError` (`ERROR` e depois `CRITICAL`). |
 | `src/services/normalization_service.py` | Converte o payload para cabeçalho + itens, descobre os parâmetros pelos campos `*_tipo_codigo` e anonimiza o operador. O que não pode ser convertido vai para o log, sem parar o lote. |
 | `src/services/parametro_service.py` | Cadastra parâmetros novos sem faixa e rejeita os que não podem ser usados. |
 | `src/services/validation_service.py` | Valida antes de gravar e devolve **um resultado por registro** (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`). Não grava nem loga. |
