@@ -21,18 +21,18 @@ def test_load_config_retorna_settings(monkeypatch):
 
 def test_load_config_le_chaves_de_seguranca(monkeypatch):
     monkeypatch.setenv("CHAVE_CRIPTOGRAFIA", " chave ")
-    monkeypatch.setenv("PEPPER_HASH", " pepper ")
+    monkeypatch.setenv("CHAVE_HASH", " chave-hash ")
 
     settings = config.load_config()
 
     assert settings.chave_criptografia == "chave"
-    assert settings.pepper_hash == "pepper"
+    assert settings.chave_hash == "chave-hash"
 
 
-def test_pepper_e_opcional(monkeypatch):
-    monkeypatch.delenv("PEPPER_HASH", raising=False)
+def test_chave_hash_e_opcional(monkeypatch):
+    monkeypatch.delenv("CHAVE_HASH", raising=False)
 
-    assert config.load_config().pepper_hash == ""
+    assert config.load_config().chave_hash == ""
 
 
 def test_fonte_dados_acima_do_tamanho_da_coluna_e_recusada(monkeypatch):

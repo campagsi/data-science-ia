@@ -119,7 +119,7 @@ Somente dados já protegidos por `src/security.py` ([seguranca-lgpd.md](seguranc
 |---|---|---|
 | `id_operador` | `INT IDENTITY` | PK |
 | `codigo_operador` | `VARCHAR(50)` | `UNIQUE`; vem de `operador_codigo` |
-| `nome_hash` | `VARCHAR(64)` | SHA-256 (ou HMAC-SHA256 com pepper) do nome |
+| `nome_hash` | `VARCHAR(64)` | SHA-256 (ou HMAC-SHA256 com a CHAVE_HASH) do nome |
 | `cpf_hash` | `VARCHAR(64)` | `UNIQUE`; SHA-256 (ou HMAC) do CPF só com dígitos |
 | `municipio_id` | `INT` | FK → `Municipios` |
 | `email_criptografado` | `VARCHAR(255) NULL` | token Fernet, reversível com a `CHAVE_CRIPTOGRAFIA` (migration V002) |
@@ -183,7 +183,7 @@ A reexecução da ingestão para o mesmo período (backfill) **não duplica nada
 
 - O banco `impacta` está igual ao DDL, com as migrations `V001` (`codigo_registro`) e `V002` (`email_criptografado`) aplicadas.
 - O DML de domínio foi aplicado: 27 estados e 11 parâmetros.
-- Primeira carga real em 06/10/2026 (fase 9 do [TODO](todo-idempotencia.md)): 1 município, 1 estação, 1 operador, 9.806 leituras e 104.582 itens. Os `id_leitura` não começam em 1 porque os testes da fase 8, desfeitos com rollback, consumiram valores do `IDENTITY` (o SQL Server não devolve esses valores), e cada reprocessamento gera ids novos para as partições substituídas.
+- Primeira carga real em 06/10/2026 (fase 9 do [TODO](todo-idempotencia.md)): 1 município, 1 estação, 1 operador, 9.806 leituras e 104.582 itens. Em 06/10/2026, as tabelas da ingestão foram esvaziadas (`Estados` e `Parametros` mantidas, por virem do DML), o `IDENTITY` foi reiniciado e a carga refeita duas vezes: a 1ª gravou `id_leitura` de 1 a 9.806 e a 2ª, ao substituir as partições, de 9.807 a 19.612. Cada reprocessamento gera ids novos para as partições substituídas; o conteúdo não muda.
 - O banco ainda tem a tabela `dbo.sysdiagrams`, criada pelo SSMS, que não interfere.
 
 ## Consultas SQL do trabalho

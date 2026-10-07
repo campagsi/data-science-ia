@@ -81,7 +81,7 @@ Critérios:
 - registrar quando houver necessidade de mascaramento;
 - garantir que dados pessoais não sejam armazenados sem necessidade.
 
-Implementado na Parte 2: CPF e nome do operador viram hash SHA-256 (ou HMAC-SHA256 com pepper), e o e-mail é criptografado de forma reversível (Fernet), tudo por `src/security.py`. Os originais não seguem para o banco nem para o log ([seguranca-lgpd.md](seguranca-lgpd.md)).
+Implementado na Parte 2: CPF e nome do operador viram hash SHA-256 (ou HMAC-SHA256 com a CHAVE_HASH), e o e-mail é criptografado de forma reversível (Fernet), tudo por `src/security.py`. Os originais não seguem para o banco nem para o log ([seguranca-lgpd.md](seguranca-lgpd.md)).
 
 ### RF05 - Persistência no banco
 O sistema deve salvar os dados limpos em banco relacional SQLite ou PostgreSQL, conforme o enunciado original.

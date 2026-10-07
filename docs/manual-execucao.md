@@ -50,7 +50,7 @@ Crie `Data-Science-Ia/.env` com base no `.env.example` e informe a string do Azu
 AZURE_SQL_CONNECTIONSTRING="Server=tcp:seu-servidor.database.windows.net,1433;Database=seu_banco;UID=seu_usuario;PWD=sua_senha;Encrypt=yes;TrustServerCertificate=no"
 FONTE_DADOS="http://127.0.0.1:8000"
 CHAVE_CRIPTOGRAFIA="chave Fernet compartilhada pelo time"
-PEPPER_HASH="segredo compartilhado pelo time (opcional)"
+CHAVE_HASH="segredo compartilhado pelo time (opcional)"
 ```
 
 | Variável | Obrigatória | Uso |
@@ -58,7 +58,7 @@ PEPPER_HASH="segredo compartilhado pelo time (opcional)"
 | `AZURE_SQL_CONNECTIONSTRING` | sim | Conexão com o banco |
 | `FONTE_DADOS` | sim | URL da API de ingestão; também é gravada em `Leituras.fonte` (máximo de 100 caracteres). Substitui a antiga `MOCK_API`. |
 | `CHAVE_CRIPTOGRAFIA` | sim | Criptografia reversível do e-mail do operador. A aplicação não inicia sem ela. |
-| `PEPPER_HASH` | não | Segredo do hash de CPF e nome; vazio = SHA-256 puro |
+| `CHAVE_HASH` | não | Segredo do hash de CPF e nome; vazio = SHA-256 puro |
 
 A `CHAVE_CRIPTOGRAFIA` é gerada uma única vez e compartilhada com o time fora do Git:
 
@@ -66,9 +66,9 @@ A `CHAVE_CRIPTOGRAFIA` é gerada uma única vez e compartilhada com o time fora 
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Use a mesma `CHAVE_CRIPTOGRAFIA` e o mesmo `PEPPER_HASH` em todas as máquinas (ver [seguranca-lgpd.md](seguranca-lgpd.md)).
+Use a mesma `CHAVE_CRIPTOGRAFIA` e a mesma `CHAVE_HASH` em todas as máquinas (ver [seguranca-lgpd.md](seguranca-lgpd.md)).
 
-Os logs de cada execução ficam em `logs/` (fora do Git): `pipeline_AAAAMMDD_HHMMSS.log` com a execução e `rejeitados_AAAAMMDD_HHMMSS.log` com tudo o que não foi importado. A variável de ambiente opcional `PASTA_LOGS` troca essa pasta; os testes a apontam para uma pasta temporária, para que `logs/` guarde só os logs de cargas reais.
+Os logs de cada execução ficam em `logs/` (fora do Git): `pipeline_AAAAMMDD_HHMMSS.log` com a execução e `rejeitados_AAAAMMDD_HHMMSS.log` com tudo o que não foi importado. Cada execução cria o seu par de arquivos, e as primeiras linhas de cada um (`[cabeçalho]`) dizem qual etapa o criou (ingestão, análise, consulta ou coleta), por quê e o que contém; numa análise ou consulta, o de rejeitados fica só com o cabeçalho, porque nada é importado. A variável de ambiente opcional `PASTA_LOGS` troca essa pasta; os testes a apontam para uma pasta temporária, para que `logs/` guarde só os logs de cargas reais.
 
 Nao use `DB_HOST`, `DB_PORT`, `DB_USER` ou `DB_PASSWORD`: essas variaveis pertencem a uma configuracao PostgreSQL e nao sao lidas pelo codigo atual.
 
@@ -150,9 +150,9 @@ python main.py
 
 Ao iniciar, `iniciar_aplicacao()` executa, nesta ordem:
 
-1. `configurar_logs()`: cria `logs/pipeline_AAAAMMDD_HHMMSS.log` e `logs/rejeitados_AAAAMMDD_HHMMSS.log`;
+1. `configurar_logs(etapa)`: cria `logs/pipeline_AAAAMMDD_HHMMSS.log` e `logs/rejeitados_AAAAMMDD_HHMMSS.log`, cada um com o cabeçalho da etapa (`ingestao`, `analise` ou `consulta`, conforme o argumento);
 2. `load_config()`: exige `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` e `CHAVE_CRIPTOGRAFIA`;
-3. `configurar_seguranca()`: valida a chave Fernet e o pepper.
+3. `configurar_seguranca()`: valida a chave Fernet e a chave de hash.
 
 Se qualquer passo falhar, a aplicação registra a causa com nível `CRITICAL` e termina com código `1`, sem mostrar senhas nem chaves. Depois, abre a interface de consulta no terminal (`src/cli`), que lê o banco.
 
@@ -229,7 +229,7 @@ python -m pytest tests
 python -m pytest tests/unit/test_security.py tests/unit/test_logger.py
 ```
 
-Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (resultado esperado: `196 passed, 18 skipped`). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
+Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (resultado esperado: `205 passed, 18 skipped`). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
 
 ## Estrutura executada
 

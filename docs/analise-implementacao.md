@@ -166,7 +166,7 @@ Quem usa o resultado:
 | Consumidor | Uso |
 |---|---|
 | Log (`src/logger.py`) | Uma única função percorre os resultados e grava no `rejeitados_*.log`: uma linha por registro inválido (com todos os `campos_nulos`) e uma por item inválido. Assim o formato do log fica igual para todas as regras. |
-| Data Lake | Em outra frente do projeto. O critério para o lake é o mesmo: só `valido=True` ("os dados brutos aprovados", item 3.1 do enunciado). |
+| Data Lake | Não será implementado neste projeto (decisão de 06/10/2026). |
 | Entidades (banco) | A persistência (fase 8) recebe só `registro` dos resultados com `valido=True`. |
 | Resumo | Recebidos = válidos + inválidos; itens gravados e itens rejeitados saem dos mesmos resultados. |
 
@@ -195,7 +195,7 @@ O `transform.py` do exemplo usa outro mecanismo, uma marca `status_pipeline = 'C
 
 ### No Data Lake
 
-O Data Lake é tratado em outra frente do projeto. A regra sugerida para ele é a mesma: arquivos particionados por data de ciclo, com a reexecução sobrescrevendo a partição em vez de acrescentar.
+O Data Lake não será implementado neste projeto (decisão de 06/10/2026).
 
 ### Critério de aceite
 
@@ -207,7 +207,7 @@ Executar o pipeline duas vezes com o mesmo dataset deve deixar **exatamente as m
 
 O log é configurado em **um único módulo**, `src/logger.py`, seguindo `avanade-ds-ia/modulo-1/projeto-pratico/src/transform.py` e `avanade-ds-ia/modulo-2/ED_PYTHON/01_ingestao_api.py`. A estrutura do módulo e as regras de dados pessoais em log estão em [seguranca-lgpd.md](seguranca-lgpd.md). Aqui fica o que é específico desta implementação:
 
-- `configurar_logs()` chamado **uma vez** no início do `main.py`, com `logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s', handlers=[...])` (formato do `transform.py`);
+- `configurar_logs(etapa)` chamado **uma vez** no início da execução, com `logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s', handlers=[...])` (formato do `transform.py`);
 - dois loggers nomeados: `DataScienceIA_Logger` (execução) e `DataScienceIA_Rejeitados` (o que não foi importado);
 - os demais módulos só obtêm o logger com `logging.getLogger(...)`: nenhum chama `basicConfig` nem `print` (o enunciado, item 3.7, também exige isso);
 - uma única função `registrar_rejeicao(etapa, nivel, campo, motivo, registro=None, valor=None, severidade=WARNING)` monta a linha de rejeitado, para que o formato seja igual em todas as etapas; o valor de campos pessoais é sempre omitido;
@@ -220,6 +220,14 @@ Além do console, dois arquivos em `logs/` (fora do Git):
 |---|---|---|
 | `logs/pipeline_AAAAMMDD_HHMMSS.log` | `DataScienceIA_Logger` | Execução completa (mesmo formato do console) |
 | `logs/rejeitados_AAAAMMDD_HHMMSS.log` | `DataScienceIA_Rejeitados` | **Tudo o que não foi importado**, uma linha por ocorrência |
+
+Cada execução cria o seu par de arquivos, com a data/hora de início no nome. As primeiras linhas de cada arquivo são um **cabeçalho** (`INFO`, marcado com `[cabeçalho]`, só no arquivo) que diz qual etapa o criou, por quê e o que ele contém. As etapas estão em `ETAPAS` no `src/logger.py`: `ingestao` (`--ingestao`), `analise` (`--analise`), `consulta` (CLI) e `coleta` (`importar_dados` avulso). Nas três últimas, que não importam dados, o arquivo de rejeitados tem só o cabeçalho, e é ele que explica por que o arquivo está vazio:
+
+```text
+2026-10-06 16:18:00,698 - [INFO] - [cabeçalho] Etapa: Ingestão (python main.py --ingestao).
+2026-10-06 16:18:00,698 - [INFO] - [cabeçalho] Por que existe: cada execução cria um par de arquivos (pipeline e rejeitados) com a data/hora de início no nome; esta execução coleta o lote na API, normaliza, anonimiza, valida e grava no banco 3FN.
+2026-10-06 16:18:00,698 - [INFO] - [cabeçalho] Conteúdo: uma linha por leitura recusada (nivel=leitura) ou medição descartada (nivel=item), com etapa, campo e motivo; valores pessoais nunca aparecem.
+```
 
 Formato de cada linha de rejeitado:
 
@@ -241,10 +249,10 @@ Como a anonimização e a minimização acontecem antes da validação, o regist
 | [main.py](../main.py) | Chamada `criar_tabelas()` removida; `iniciar_aplicacao()` chama `configurar_logs()` uma vez; `print` trocado por log (fases 2 e 3). Na fase 8, `run_pipeline()` passou a fazer só a ingestão (com resumo), a análise foi para `gerar_relatorio()` e foi criado o comando `python main.py --ingestao`. Na fase 15, `gerar_relatorio()` passou a analisar o modelo 3FN e foi criado `--analise` (com `--estacao`, `--inicio`, `--fim`, via `argparse`). |
 | `src/ingestion/bronze_writer.py` | Criado na fase 8 e **removido em 05/10/2026**: o Data Lake não será implementado neste projeto (decisão de 06/10/2026). |
 | `src/services/parametro_service.py` (novo, fase 7) | `sincronizar()`: cadastra parâmetros novos sem faixa e rejeita, com ERROR, os que não podem ser usados; `faixas()` para a validação. |
-| `src/logger.py` (novo) | Configuração única de log: `configurar_logs()`, loggers `DataScienceIA_Logger` e `DataScienceIA_Rejeitados`, `registrar_rejeicao(...)`. Fase 9: pasta trocável por `PASTA_LOGS`. Fase 15: `registrar_anomalias()` (uma linha `WARNING` por anomalia da análise). |
+| `src/logger.py` (novo) | Configuração única de log: `configurar_logs(etapa)` (com cabeçalho por arquivo desde 06/10/2026), loggers `DataScienceIA_Logger` e `DataScienceIA_Rejeitados`, `registrar_rejeicao(...)`. Fase 9: pasta trocável por `PASTA_LOGS`. Fase 15: `registrar_anomalias()` (uma linha `WARNING` por anomalia da análise). |
 | `src/security.py` (novo) | Único ponto de anonimização e criptografia: `anonimizar_cpf`, `anonimizar_nome`, `criptografar_email`, `descriptografar_email` ([seguranca-lgpd.md](seguranca-lgpd.md)). |
-| [src/config.py](../src/config.py) | Ler `CHAVE_CRIPTOGRAFIA` (e `PEPPER_HASH`, se D8 aprovada) e falhar se ausente, sem expor o valor. |
-| [.env.example](../.env.example) | Incluir `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH` (só os nomes). `MOCK_API` foi renomeada para `FONTE_DADOS` (D3). |
+| [src/config.py](../src/config.py) | Ler `CHAVE_CRIPTOGRAFIA` (e `CHAVE_HASH`, se D8 aprovada) e falhar se ausente, sem expor o valor. |
+| [.env.example](../.env.example) | Incluir `CHAVE_CRIPTOGRAFIA` e `CHAVE_HASH` (só os nomes). `MOCK_API` foi renomeada para `FONTE_DADOS` (D3). |
 | `src/database/criar_tabelas.py` | **Removido** (criava o modelo antigo). O schema vem do DDL e das migrations. |
 | `sql/migrations/` (novo) | Uma migration idempotente `VNNN__descricao.sql` por mudança de estrutura; o DDL é atualizado na mesma entrega. Aplicadas: `V001__leituras_codigo_registro.sql` (D1) e `V002__operadores_email_criptografado.sql` (D7). |
 | [src/database/connection.py](../src/database/connection.py) | `insert_em_lotes()` (fase 8): `INSERT` de várias linhas por comando, respeitando o limite de parâmetros do SQL Server. |
@@ -304,7 +312,7 @@ Precisam de resposta antes da fase correspondente do TODO.
 | D10 | Regra do Z-Score | (a) anômala se fora do IQR **ou** com \|Z\| > 3, indicador informando o(s) método(s) (`IQR`, `ZSCORE`, `IQR+ZSCORE`); (b) anômala só se fora do IQR **e** \|Z\| > 3 (Z-Score confirma o IQR); (c) limite \|Z\| > 2 | **Aprovada (a) em 06/10/2026**, com \|Z\| > 3: mostra o resultado de cada método sem esconder nenhum; o indicador diz qual sinalizou. |
 | D12 | Precipitação com IQR = 0 (maioria 0 mm): toda chuva acima de zero vira anomalia `IQR` (1.210 dos 1.824 alertas) | (a) manter a regra e documentar; (b) IQR só sobre os valores positivos quando IQR = 0; (c) só Z-Score quando IQR = 0 | **Aprovada (a) em 06/10/2026**: mesma regra para todos os parâmetros; a limitação fica documentada em `analise-estatistica.md`. |
 | D11 | Agrupamento dos parâmetros na CLI (`Parametros` não tem grupo) | (a) mostrar todos os parâmetros da estação juntos (sem o menu de tipo); (b) grupo fixo no código por código de parâmetro; (c) coluna `grupo` em `Parametros` (migration + DML) | **Aprovada (a) em 06/10/2026**: não exige schema nem lista fixa e funciona para parâmetros novos. |
-| D8 | Hash de CPF e nome com pepper | (a) SHA-256 puro, como no exemplo; (b) SHA-256 de `PEPPER_HASH` + valor | **Implementada configurável na fase 2** (`PEPPER_HASH` preenchido = HMAC-SHA256). Recomendação mantida: (b). o CPF tem só 10¹¹ combinações e o SHA-256 puro pode ser revertido por força bruta. Mantém os 64 caracteres. |
+| D8 | Hash de CPF e nome com chave secreta | (a) SHA-256 puro, como no exemplo; (b) SHA-256 de `CHAVE_HASH` + valor | **Implementada configurável na fase 2** (`CHAVE_HASH` preenchida = HMAC-SHA256). Recomendação mantida: (b). o CPF tem só 10¹¹ combinações e o SHA-256 puro pode ser revertido por força bruta. Mantém os 64 caracteres. |
 
 ---
 
@@ -327,7 +335,7 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
   - D3 = `FONTE_DADOS` no `.env`, com a URL da API, que substitui `MOCK_API` e é gravada em `Leituras.fonte`;
   - D4 = aprovada;
   - D5 = descartar;
-  - D6 = proposta aplicada no DML, aguardando validação;
+  - D6 = proposta aplicada no DML (aprovada pelo time em 06/10/2026);
   - D7 = (a) `email_criptografado`;
   - D8 = configurável.
 - **Alterações no banco:** migrations `V001` e `V002` criadas, `ddl_banco_relacional.sql` atualizado para o estado final, as duas aplicadas no banco `impacta` (com `Leituras` e `Operadores` vazias; cada uma executada duas vezes) e Fase 0 repetida. O banco ficou igual ao DDL. A coluna `email_criptografado` foi posta no fim de `Operadores` também no DDL, para que um banco criado do zero tenha a mesma ordem do banco migrado.
@@ -338,13 +346,13 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 - **Alterações:**
   - `src/logger.py` (novo): `configurar_logs()`, loggers `DataScienceIA_Logger` e `DataScienceIA_Rejeitados`, `registrar_rejeicao()`, `contar_rejeicoes()`, `registrar_resumo()`.
   - `src/security.py` (novo): `configurar_seguranca()`, `anonimizar_cpf()`, `anonimizar_nome()`, `criptografar_email()`, `descriptografar_email()`.
-  - `src/config.py`: `Settings` ganhou `chave_criptografia` e `pepper_hash`; `CHAVE_CRIPTOGRAFIA` passou a ser obrigatória. Depois, `mock_api` foi substituído por `fonte_dados` (ver D3).
+  - `src/config.py`: `Settings` ganhou `chave_criptografia` e `chave_hash`; `CHAVE_CRIPTOGRAFIA` passou a ser obrigatória. Depois, `mock_api` foi substituído por `fonte_dados` (ver D3).
   - `main.py`: nova `iniciar_aplicacao()` (logs → configuração → segurança), chamada antes da CLI; `print` trocado por `logger`.
   - `src/ingestion/importar_dados.py`: `print` do bloco `__main__` trocado por log.
   - `requirements.txt`: `cryptography` e `rich` (a CLI já usava `rich`, mas ele não estava listado e os testes nem chegavam a rodar).
   - `.env.example`, `.gitignore` (`logs/` e dados de `data_lake/`), `docs/seguranca-lgpd.md`, `docs/manual-execucao.md`.
 - **Decisões:**
-  - A D8 ficou configurável: `PEPPER_HASH` preenchido usa HMAC-SHA256, vazio usa SHA-256 puro.
+  - A D8 ficou configurável: `CHAVE_HASH` preenchida usa HMAC-SHA256, vazia usa SHA-256 puro.
   - O CPF é anonimizado só com os dígitos, e o nome sem espaços extras e sem diferença de maiúsculas, para que a mesma pessoa gere sempre o mesmo hash.
   - Rejeitados só em arquivo, sem console.
   - O formato de log é o do `transform.py` (`' - '` entre as partes).
@@ -430,7 +438,7 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
   - **Conferência independente:** um cálculo feito direto sobre o JSON bruto, sem usar o `ValidationService`, deu os mesmos números:
     - **82** registros inválidos (50 sem estação nem operador; 32 só sem operador) e **9.806** válidos;
     - **2.681** medições nulas e **603** fora da faixa nos registros válidos.
-  - Log de rejeitados com 3.366 linhas e sem CPF nem e-mail.
+  - Log de rejeitados com 3.366 linhas de rejeição (sem contar o cabeçalho, acrescentado depois) e sem CPF nem e-mail.
   - `pytest`: **136 passaram e 7 foram pulados**.
 - **Correção de um número da análise:** o pH fora de 0–14 nos registros **válidos** é 72, e não 73. A 73ª ocorrência está num registro já rejeitado por completude.
 
@@ -497,11 +505,12 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
   - 1ª execução de `python main.py --ingestao` (≈18 s): `recebidos=9888 registros_validos=9806 registros_invalidos=82 itens_descartados=3284 leituras_gravadas=9806 itens_gravados=104582`; 1 município, 1 estação, 1 operador;
   - 2ª execução: `leituras_substituidas=9806`, contagens, itens por parâmetro e partições (206 dias) idênticos; só os `id_leitura` mudaram, como esperado na substituição;
   - consultas de duplicidade, leitura sem item, item fora da faixa e hash/e-mail: todas vazias nas duas execuções;
-  - log de rejeitados com 3.366 linhas: 9.806 leituras no banco + 82 rejeitadas = 9.888; por parâmetro, itens gravados + rejeitados = 9.806 nos 11;
+  - log de rejeitados com 3.366 linhas de rejeição: 9.806 leituras no banco + 82 rejeitadas = 9.888; por parâmetro, itens gravados + rejeitados = 9.806 nos 11;
   - nenhum CPF, nome ou e-mail do dataset em `logs/`;
   - backfill: `run_pipeline()` só com os 48 registros de 10/07/2026 (47 válidos) regravou as 47 leituras daquele dia com ids novos; as outras 9.759 mantiveram os ids, e os 104.582 itens (registro, parâmetro, valor) ficaram idênticos;
   - `python main.py --analise` no banco real: 1.824 linhas `WARNING` de alerta (1.528 `IQR`, 296 `IQR+ZSCORE`), igual ao banco de teste.
-- **Observação:** os `id_leitura` começam em 19.613 porque os testes da fase 8, desfeitos com rollback, consumiram valores do `IDENTITY`.
+- **Observação:** os `id_leitura` começavam em 19.613 porque os testes da fase 8, desfeitos com rollback, consumiram valores do `IDENTITY`.
+- **Recarga limpa (06/10/2026, a pedido do time):** `Leitura_Itens`, `Leituras`, `Estacoes`, `Operadores` e `Municipios` esvaziadas numa transação, com `IDENTITY` reiniciado; `Estados` (27) e `Parametros` (11) mantidas. Duas cargas seguidas: 1ª com `leituras_substituidas=0` e ids 1 a 9.806, 2ª com `leituras_substituidas=9806` e ids 9.807 a 19.612; contagens, itens por parâmetro e partições idênticos; todas as consultas de conferência vazias; 9.806 + 82 = 9.888 no log de rejeitados; nenhum dado pessoal em `logs/`; `--analise` com 1.824 alertas; CLI sem erro.
 - **Coberto pelos testes de integração** (SQL Server Express local, dataset completo):
   - duas execuções seguidas da `run_pipeline()`: mesmo resumo e mesmas contagens; a 2ª substitui as 9.806 leituras;
   - todas as consultas de duplicidade, órfãos, faixa e hash/e-mail voltam vazias;
@@ -611,5 +620,19 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 
 - D2, D5 e D6 aprovadas como recomendadas, sem mudança de código: leitura sem operador é rejeitada e logada; campos sem coluna são descartados; as faixas do `dml_populacao.sql` ficam valendo.
 - D12 (nova): a regra IQR é mantida também na precipitação; a limitação está documentada.
-- Pendente só a tarefa operacional do time: gerar e compartilhar uma única `CHAVE_CRIPTOGRAFIA` e um único `PEPPER_HASH`.
+- Pendente só a tarefa operacional do time: gerar e compartilhar uma única `CHAVE_CRIPTOGRAFIA` e uma única `CHAVE_HASH`.
 
+### Ajuste — cabeçalho nos arquivos de log (06/10/2026)
+
+- **Motivo:** cada execução cria um par de arquivos, e os de rejeitados da análise e da CLI ficavam vazios, sem nada que explicasse a origem. A pedido do time, todo arquivo passa a começar dizendo qual etapa o criou e por quê.
+- **`src/logger.py`:** `configurar_logs(etapa, pasta=None)` exige a etapa (`ingestao`, `analise`, `consulta` ou `coleta`; outra gera `ValueError`) e grava 3 linhas de cabeçalho em cada arquivo: etapa e comando, por que o arquivo existe e o que ele contém. As linhas seguem o formato estruturado (`data - [INFO] - mensagem`), levam o marcador `[cabeçalho]` (`MARCADOR_CABECALHO`) e não vão para o console.
+- **`main.py`:** `iniciar_aplicacao(etapa)` e `etapa_da_execucao(argumentos)`; `importar_dados.py` avulso usa `coleta`.
+- **Testes:** a fixture `logs_temporarios` e o `_ler` de `test_logger.py` ignoram o cabeçalho (as contagens de rejeitados continuam valendo); testes novos conferem o cabeçalho nas quatro etapas, a ordem (antes das demais linhas), a ausência no console, a etapa desconhecida e a etapa escolhida a partir dos argumentos. `205 passed, 18 skipped` sem banco de teste; `223 passed` com ele.
+
+
+### Ajuste — `PEPPER_HASH` renomeada para `CHAVE_HASH` (07/10/2026)
+
+- **Motivo:** "pepper" não dizia para que a variável serve. `CHAVE_HASH` fica em paralelo com `CHAVE_CRIPTOGRAFIA`: uma cifra o e-mail, a outra entra no hash de CPF e nome.
+- **Alterado:** variável de ambiente (`.env`, `.env.example`), `Settings.chave_hash` em `src/config.py`, parâmetro e variável interna de `src/security.py`, `main.py`, testes e documentação. Comportamento igual: preenchida = HMAC-SHA256, vazia = SHA-256 puro.
+- **Atenção:** o valor não muda, só o nome. Em cada máquina, renomear a linha `PEPPER_HASH=` do `.env` para `CHAVE_HASH=` mantendo o valor. Como a variável é opcional, um `.env` com o nome antigo não gera erro: o hash vira SHA-256 puro e os operadores já gravados seriam cadastrados de novo.
+- **Validação:** `205 passed, 18 skipped` sem banco de teste; `223 passed` com ele.

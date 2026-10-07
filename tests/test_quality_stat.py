@@ -36,7 +36,7 @@ def resultados(dataset):
     from src.security import configurar_seguranca
     import os
 
-    configurar_seguranca(os.environ["CHAVE_CRIPTOGRAFIA"], os.environ["PEPPER_HASH"])
+    configurar_seguranca(os.environ["CHAVE_CRIPTOGRAFIA"], os.environ["CHAVE_HASH"])
     logging.disable(logging.CRITICAL)
     try:
         normalizados = NormalizationService().normalize(dataset)

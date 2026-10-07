@@ -66,7 +66,7 @@ tests/
 └── test_quality_stat.py   # qualidade e estatística com o dataset completo (aceite das fases 5, 6 e 14)
 ```
 
-O `conftest.py` da raiz define valores de teste antes de importar o código: `AZURE_SQL_CONNECTIONSTRING` e `FONTE_DADOS` (para que nenhum teste acesse o banco real ou a API configurados no `.env`) e `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH` (chave Fernet e segredo usados só nos testes). Por isso os testes rodam mesmo que o `.env` local ainda não tenha as chaves.
+O `conftest.py` da raiz define valores de teste antes de importar o código: `AZURE_SQL_CONNECTIONSTRING` e `FONTE_DADOS` (para que nenhum teste acesse o banco real ou a API configurados no `.env`) e `CHAVE_CRIPTOGRAFIA` e `CHAVE_HASH` (chave Fernet e segredo usados só nos testes). Por isso os testes rodam mesmo que o `.env` local ainda não tenha as chaves.
 
 | Fixture | Uso |
 |---|---|
@@ -77,11 +77,11 @@ O `conftest.py` da raiz define valores de teste antes de importar o código: `AZ
 
 | Arquivo | O que verifica |
 |---|---|
-| `unit/test_config.py` | `load_config()`: valores válidos, `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` e `CHAVE_CRIPTOGRAFIA` obrigatórias, `FONTE_DADOS` com no máximo 100 caracteres, `PEPPER_HASH` opcional e ausência de segredos na mensagem |
-| `unit/test_security.py` | `src/security.py`: hash com 64 caracteres, determinístico e sem o valor original, CPF com pontuação, nome com espaços e maiúsculas, efeito do pepper, `None` para vazio, ida e volta da criptografia do e-mail, token diferente a cada chamada, chave errada ou inválida sem expor segredos e erro quando a segurança não foi configurada (CT-06, CT-07) |
+| `unit/test_config.py` | `load_config()`: valores válidos, `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` e `CHAVE_CRIPTOGRAFIA` obrigatórias, `FONTE_DADOS` com no máximo 100 caracteres, `CHAVE_HASH` opcional e ausência de segredos na mensagem |
+| `unit/test_security.py` | `src/security.py`: hash com 64 caracteres, determinístico e sem o valor original, CPF com pontuação, nome com espaços e maiúsculas, efeito da chave de hash, `None` para vazio, ida e volta da criptografia do e-mail, token diferente a cada chamada, chave errada ou inválida sem expor segredos e erro quando a segurança não foi configurada (CT-06, CT-07) |
 | `unit/test_sql_scripts.py` | scripts SQL sem banco: 27 UFs no DML, estados e parâmetros do dataset cobertos (código `*_tipo_codigo` e unidade iguais ao payload), nomes de parâmetro únicos, faixas coerentes, pH 0–14, DML só com `MERGE` e ordem dos `DROP` do DDL |
 | `unit/test_parametro_service.py` | `ParametroService` com repositório em memória: parâmetros já cadastrados não são reinseridos, parâmetro novo cadastrado sem faixa com log INFO, segunda execução não cadastra de novo (aceite da fase 7), rejeição com ERROR (sem unidade, nome de outro código, unidade diferente da cadastrada, tamanho acima do DDL), unidade sem diferenciar maiúsculas, dois códigos novos com o mesmo nome, `faixas()`, descarte na validação das medições de parâmetro rejeitado e `INSERT ... WHERE NOT EXISTS` do repositório |
-| `unit/test_logger.py` | `src/logger.py`: criação dos dois arquivos, formato da linha, rejeitados só no arquivo próprio, severidade `ERROR` para parâmetro, valor de campo pessoal omitido (CT-08), contagem por nível, `registrar_resultados_validacao()` (linhas e contagens a partir dos resultados) e linha de resumo |
+| `unit/test_logger.py` | `src/logger.py`: criação dos dois arquivos, cabeçalho com etapa, motivo e conteúdo nas quatro etapas (antes das demais linhas e fora do console), etapa desconhecida recusada, formato da linha, rejeitados só no arquivo próprio, severidade `ERROR` para parâmetro, valor de campo pessoal omitido (CT-08), contagem por nível, `registrar_resultados_validacao()` (linhas e contagens a partir dos resultados) e linha de resumo |
 | `unit/test_data_client.py` | `fetch_data()` com relógio simulado: endpoint, nova tentativa com espera crescente para queda de conexão, timeout, 500 e 503, tentativas esgotadas (`FonteIndisponivelError` e `ERROR`), `Retry-After` do 429, espaçamento pelo limite por minuto, 4xx sem nova tentativa, corpo vazio e `[]` como lote vazio (`WARNING`), JSON inválido, resposta que não é lista e registro que não é objeto (CT-16) |
 | `unit/test_normalization_service.py` | `normalize()` com o payload novo: cabeçalho e tipos, `municipio` com fallback, 11 itens com código e unidade (inclusive nomes fora do padrão), anonimização e minimização, payload original preservado, texto vazio como `None`, medição nula mantida como item, rejeição só do item (medição não numérica, parâmetro sem código) ou só da leitura (data ou coordenada inválida), ordenação, parâmetro novo descoberto, campos descartados no log e aceite da fase 4 com o dataset completo |
 | `unit/test_validation_service.py` | `validate_data()` com o contrato novo: um resultado por registro e na mesma ordem, `campos_nulos` com todos os campos vitais nulos, medição nula ou fora da faixa descartada só como item (inclusive limites e faixa aberta), parâmetro sem faixa, leitura sem medições válidas, coordenada fora da faixa, estado não cadastrado, sigla inválida, `registro_codigo` repetido, código de estação ou operador com dados diferentes, `registros_validos()`, registro normalizado preservado e nenhum dado pessoal em claro |
@@ -142,7 +142,7 @@ python -m pytest tests/unit/test_main.py -k chave
 python -m pytest tests -rs
 ```
 
-Resultado esperado em 06/10/2026: sem banco de teste, **196 passed, 18 skipped**; com o banco de teste, **214 passed** (pouco mais de 1 minuto).
+Resultado esperado em 06/10/2026: sem banco de teste, **205 passed, 18 skipped**; com o banco de teste, **223 passed** (pouco mais de 1 minuto).
 
 Nenhum teste grava em `logs/`: o `conftest.py` aponta a variável `PASTA_LOGS` para uma pasta temporária, inclusive para os testes de `test_main.py` que executam `python main.py` em um subprocesso. Assim, `logs/` guarda só os logs de cargas reais.
 

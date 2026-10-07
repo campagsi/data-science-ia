@@ -18,10 +18,10 @@ sequenceDiagram
     participant DB as Azure SQL
 
     Usuario->>Main: python main.py --ingestao
-    Main->>Log: configurar_logs()
+    Main->>Log: configurar_logs("ingestao")
     Main->>Config: load_config()
     Config-->>Main: settings (FONTE_DADOS, banco, chaves)
-    Main->>Sec: configurar_seguranca(chave, pepper)
+    Main->>Sec: configurar_seguranca(chave, chave_hash)
 
     Main->>Client: fetch_data()
     Client-->>Main: raw_data
@@ -57,7 +57,7 @@ sequenceDiagram
 
 ### 1. Inicialização (`main.py` → `logger.py`, `config.py`, `security.py`)
 
-`iniciar_aplicacao()` executa, nesta ordem, `configurar_logs()`, `load_config()` e `configurar_seguranca()`. A configuração exige `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, até 100 caracteres) e `CHAVE_CRIPTOGRAFIA`. Uma falha aqui é registrada com nível `CRITICAL` e encerra com código `1`, sem expor segredos. Com `--analise`, executa a análise (seção abaixo); sem argumentos, abre a CLI de consulta.
+`iniciar_aplicacao(etapa)` executa, nesta ordem, `configurar_logs(etapa)`, `load_config()` e `configurar_seguranca()`. A etapa vem do argumento (`--ingestao` = `ingestao`, `--analise` = `analise`, sem argumento = `consulta`) e vai para o cabeçalho dos dois arquivos de log. A configuração exige `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, até 100 caracteres) e `CHAVE_CRIPTOGRAFIA`. Uma falha aqui é registrada com nível `CRITICAL` e encerra com código `1`, sem expor segredos. Com `--analise`, executa a análise (seção abaixo); sem argumentos, abre a CLI de consulta.
 
 ### 2. Coleta (`data_client.py`)
 

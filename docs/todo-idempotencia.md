@@ -57,7 +57,7 @@ Detalhes e recomendações na seção 10 da análise.
 - [x] **D5** Campos do payload sem coluna no DDL: descartar (06/10/2026)
 - [x] **D6** Faixas mínima e máxima dos parâmetros: proposta da fase 3 aprovada (06/10/2026)
 - [x] **D7** E-mail criptografado: `email_hash` trocado por `email_criptografado VARCHAR(255) NULL` (aprovada em 05/10/2026)
-- [x] **D8** Hash com pepper: configurável (`PEPPER_HASH` preenchido = HMAC-SHA256; vazio = SHA-256 puro), fase 2
+- [x] **D8** Hash com chave secreta: configurável (`CHAVE_HASH` preenchida = HMAC-SHA256; vazia = SHA-256 puro), fase 2
 - [x] D1 = (a) e D7 = (a): migrations `V001` e `V002` criadas em `sql/migrations/`, DDL atualizado, aplicadas no banco `impacta` (duas vezes, para provar a idempotência) e Fase 0 repetida. Ações originais:
 - [x] Criar as migrations abaixo, atualizar o `ddl_banco_relacional.sql` para o estado final, aplicar as migrations no banco e repetir a Fase 0 (regras na seção 4 de [manual-execucao.md](manual-execucao.md))
 
@@ -103,12 +103,12 @@ Desenho em [seguranca-lgpd.md](seguranca-lgpd.md) e na seção 6 da análise.
 **`src/security.py`** (padrão `security.py`)
 
 - [x] `anonimizar_cpf` (ignora pontuação), `anonimizar_nome` (ignora espaços extras e maiúsculas): 64 caracteres hexadecimais, `None` para vazio
-- [x] Com `PEPPER_HASH` preenchido usa HMAC-SHA256; vazio usa SHA-256 puro (atende as duas opções da D8)
+- [x] Com `CHAVE_HASH` preenchida usa HMAC-SHA256; vazia usa SHA-256 puro (atende as duas opções da D8)
 - [x] `criptografar_email`, `descriptografar_email`: Fernet, `None` para vazio; erro de chave não expõe o token
 - [x] Chave em `CHAVE_CRIPTOGRAFIA` no `.env`, lida pelo `src/config.py` e entregue por `configurar_seguranca()` (nunca fixa no código, ao contrário do exemplo); a aplicação não inicia sem ela ou com chave inválida
 - [x] `cryptography` (e `rich`, usado pela CLI e que faltava) no `requirements.txt`
-- [x] `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH` no `.env.example` (só os nomes); `MOCK_API` renomeada para `FONTE_DADOS`
-- [ ] **Time:** gerar **uma** `CHAVE_CRIPTOGRAFIA` e **um** `PEPPER_HASH` e compartilhar com todos fora do Git (chaves diferentes geram hashes diferentes e e-mails ilegíveis entre máquinas)
+- [x] `CHAVE_CRIPTOGRAFIA` e `CHAVE_HASH` no `.env.example` (só os nomes); `MOCK_API` renomeada para `FONTE_DADOS`
+- [ ] **Time:** gerar **uma** `CHAVE_CRIPTOGRAFIA` e **uma** `CHAVE_HASH` e compartilhar com todos fora do Git (chaves diferentes geram hashes diferentes e e-mails ilegíveis entre máquinas)
 
 **Git**
 
@@ -233,7 +233,7 @@ Regras por nível:
 - [x] 603 medições fora da faixa descartadas só como item, entre elas pH fora de 0–14 (72; a 73ª está num registro já rejeitado por completude) e umidade fora de 0–100 (69)
 - [x] As leituras dessas medições continuam válidas com os demais itens
 - [x] Nenhum item gravável fica fora da faixa
-- [x] Log de rejeitados com 3.366 linhas (82 leituras + 2.681 nulas + 603 fora da faixa), sem CPF nem e-mail
+- [x] Log de rejeitados com 3.366 linhas de rejeição (82 leituras + 2.681 nulas + 603 fora da faixa), sem CPF nem e-mail
 
 ---
 

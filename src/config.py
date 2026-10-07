@@ -14,7 +14,7 @@ class Settings:
     fonte_dados: str
     azure_sql_connectionstring: str
     chave_criptografia: str = ""
-    pepper_hash: str = ""
+    chave_hash: str = ""
 
 
 def load_config() -> Settings:
@@ -41,6 +41,6 @@ def load_config() -> Settings:
         fonte_dados=fonte_dados,
         azure_sql_connectionstring=connection_string,
         chave_criptografia=chave_criptografia,
-        # Opcional: sem pepper, o hash é SHA-256 puro (decisão D8).
-        pepper_hash=os.getenv("PEPPER_HASH", "").strip(),
+        # Opcional: sem a chave de hash, o hash é SHA-256 puro (decisão D8).
+        chave_hash=os.getenv("CHAVE_HASH", "").strip(),
     )

@@ -12,7 +12,7 @@ LINHA = re.compile(
 
 @pytest.fixture
 def arquivos(tmp_path):
-    caminhos = log.configurar_logs(tmp_path)
+    caminhos = log.configurar_logs("ingestao", tmp_path)
     yield caminhos
     # Fecha os arquivos para o tmp_path poder ser removido no Windows.
     for nome in (log.NOME_LOGGER_REJEITADOS, ""):
@@ -21,10 +21,19 @@ def arquivos(tmp_path):
             logging.getLogger(nome or None).removeHandler(handler)
 
 
-def _ler(caminho):
+def _ler(caminho, cabecalho=False):
+    """Linhas do arquivo; sem o cabeçalho, a menos que cabecalho=True."""
     for handler in logging.getLogger().handlers + log.logger_rejeitados.handlers:
         handler.flush()
-    return caminho.read_text(encoding="utf-8").splitlines()
+    linhas = caminho.read_text(encoding="utf-8").splitlines()
+    return linhas if cabecalho else [l for l in linhas if log.MARCADOR_CABECALHO not in l]
+
+
+def _fechar_logs():
+    for alvo in (log.logger_rejeitados, logging.getLogger()):
+        for handler in list(alvo.handlers):
+            handler.close()
+            alvo.removeHandler(handler)
 
 
 def test_configurar_logs_cria_os_dois_arquivos(arquivos, tmp_path):
@@ -37,7 +46,7 @@ def test_configurar_logs_cria_os_dois_arquivos(arquivos, tmp_path):
 
 def test_pasta_logs_do_ambiente_substitui_a_padrao(monkeypatch, tmp_path):
     monkeypatch.setenv("PASTA_LOGS", str(tmp_path / "ambiente"))
-    caminhos = log.configurar_logs()
+    caminhos = log.configurar_logs("ingestao")
     try:
         assert caminhos["pipeline"].parent == tmp_path / "ambiente"
         assert caminhos["pipeline"].parent != log.PASTA_LOGS
@@ -101,7 +110,7 @@ def test_contagem_de_rejeicoes_por_nivel_e_reiniciada(arquivos, tmp_path):
 
     assert log.contar_rejeicoes() == {"leitura": 1, "item": 2}
 
-    log.configurar_logs(tmp_path / "nova")
+    log.configurar_logs("ingestao", tmp_path / "nova")
     assert log.contar_rejeicoes() == {}
 
 
@@ -156,3 +165,42 @@ def test_resumo_em_info(arquivos):
     assert _ler(arquivos["pipeline"])[-1].endswith(
         "- [INFO] - Resumo da ingestão: recebidos=10 importados=8 rejeitados=2"
     )
+
+
+@pytest.mark.parametrize("etapa", sorted(log.ETAPAS))
+def test_cabecalho_identifica_a_etapa_e_o_motivo_nos_dois_arquivos(etapa, tmp_path):
+    caminhos = log.configurar_logs(etapa, tmp_path)
+    try:
+        descricao = log.ETAPAS[etapa]
+        pipeline = _ler(caminhos["pipeline"], cabecalho=True)
+        rejeicoes = _ler(caminhos["rejeitados"], cabecalho=True)
+    finally:
+        _fechar_logs()
+
+    for linhas in (pipeline, rejeicoes):
+        assert all(LINHA.match(linha) and log.MARCADOR_CABECALHO in linha for linha in linhas)
+        assert f"Etapa: {descricao['execucao']}." in linhas[0]
+        assert descricao["objetivo"] in linhas[1]
+    assert rejeicoes[-1].endswith(f"Conteúdo: {descricao['rejeitados']}.")
+    if etapa == "ingestao":
+        assert caminhos["rejeitados"].name in pipeline[-1]
+    else:
+        assert "não importa dados" in rejeicoes[-1]
+
+
+def test_cabecalho_vem_antes_das_demais_linhas_e_nao_vai_para_o_console(tmp_path, capsys):
+    caminhos = log.configurar_logs("analise", tmp_path)
+    try:
+        log.logger.info("Relatório")
+        linhas = _ler(caminhos["pipeline"], cabecalho=True)
+    finally:
+        _fechar_logs()
+
+    assert log.MARCADOR_CABECALHO in linhas[0]
+    assert linhas[-1].endswith("Relatório")
+    assert log.MARCADOR_CABECALHO not in capsys.readouterr().err
+
+
+def test_etapa_desconhecida_e_recusada(tmp_path):
+    with pytest.raises(ValueError, match="Etapa de log desconhecida"):
+        log.configurar_logs("outra", tmp_path)

@@ -133,6 +133,6 @@ def importar_dados() -> list[dict]:
 if __name__ == "__main__":
     from src.logger import configurar_logs, logger
 
-    configurar_logs()
+    configurar_logs("coleta")
     dados = importar_dados()
     logger.info(f"Dados recebidos da API: {len(dados)} registros.")

@@ -147,11 +147,15 @@ def gerar_relatorio(
     return relatorio
 
 
-def iniciar_aplicacao() -> Settings:
-    """Prepara logs, configuração e chaves antes de qualquer etapa da aplicação."""
-    configurar_logs()
+def iniciar_aplicacao(etapa: str) -> Settings:
+    """
+    Prepara logs, configuração e chaves antes de qualquer etapa da aplicação.
+
+    etapa ("ingestao", "analise" ou "consulta") vai para o cabeçalho dos logs.
+    """
+    configurar_logs(etapa)
     settings = load_config()
-    configurar_seguranca(settings.chave_criptografia, settings.pepper_hash)
+    configurar_seguranca(settings.chave_criptografia, settings.chave_hash)
     logger.info("Configuração carregada e segurança inicializada.")
     return settings
 
@@ -184,10 +188,19 @@ def ler_argumentos(argv: list[str]) -> argparse.Namespace:
     return argumentos
 
 
+def etapa_da_execucao(argumentos: argparse.Namespace) -> str:
+    """Etapa registrada no cabeçalho dos logs (chave de src.logger.ETAPAS)."""
+    if argumentos.ingestao:
+        return "ingestao"
+    if argumentos.analise:
+        return "analise"
+    return "consulta"
+
+
 if __name__ == "__main__":
     argumentos = ler_argumentos(sys.argv[1:])
     try:
-        settings = iniciar_aplicacao()
+        settings = iniciar_aplicacao(etapa_da_execucao(argumentos))
         if argumentos.ingestao:
             run_pipeline()
         elif argumentos.analise:

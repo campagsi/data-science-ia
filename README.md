@@ -132,6 +132,6 @@ Cada registro da API é um ciclo de leitura de uma estação: estado, município
 - **Carga real feita em 06/10/2026** (fase 9): o banco `impacta` tem 9.806 leituras e 104.582 medições de 1 estação. Duas cargas seguidas deram contagens idênticas, sem duplicidade nem dado pessoal em claro, e o backfill de um dia mudou só aquela partição.
 - Analytics no modelo 3FN concluído (fases 12 a 17): 1.824 anomalias no banco real, iguais às do banco de teste e do SQL.
 - Decisões D1 a D12 tomadas; a regra IQR na precipitação (IQR = 0 sinaliza toda chuva) foi mantida e está explicada em [docs/analise-estatistica.md](docs/analise-estatistica.md).
-- **Pendente:** o time gerar e compartilhar uma única `CHAVE_CRIPTOGRAFIA` e um único `PEPPER_HASH`.
+- **Pendente:** o time gerar e compartilhar uma única `CHAVE_CRIPTOGRAFIA` e uma única `CHAVE_HASH`.
 - O Data Lake não será implementado neste repositório.
 - A aplicação usa Azure SQL; o enunciado da Parte 1 citava SQLite ou PostgreSQL.

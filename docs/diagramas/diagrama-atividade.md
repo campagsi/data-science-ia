@@ -64,7 +64,7 @@ flowchart TD
 Etapa inicial de segurança e preparação do ambiente (`iniciar_aplicacao()` em `main.py`):
 
 - configura os logs (`src/logger.py`): arquivo da execução e arquivo de rejeitados em `logs/`;
-- lê as variáveis de ambiente do `.env`: `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, também gravada em `Leituras.fonte`), `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH`;
+- lê as variáveis de ambiente do `.env`: `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, também gravada em `Leituras.fonte`), `CHAVE_CRIPTOGRAFIA` e `CHAVE_HASH`;
 - valida se as obrigatórias estão preenchidas e se a chave de criptografia é uma chave Fernet válida;
 - entrega as chaves ao `src/security.py`.
 
@@ -80,7 +80,7 @@ Limpa os textos, converte números e datas e separa cada registro em cabeçalho 
 
 ### 4. Tratamento de dados sensíveis
 
-CPF e nome viram hash SHA-256 (ou HMAC-SHA256 com pepper) e o e-mail é criptografado (Fernet). Os valores originais não seguem para as próximas etapas. Regras em [seguranca-lgpd.md](../seguranca-lgpd.md).
+CPF e nome viram hash SHA-256 (ou HMAC-SHA256 com a CHAVE_HASH) e o e-mail é criptografado (Fernet). Os valores originais não seguem para as próximas etapas. Regras em [seguranca-lgpd.md](../seguranca-lgpd.md).
 
 ### 5. Parâmetros e validação
 

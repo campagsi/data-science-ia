@@ -336,13 +336,21 @@ def test_iniciar_aplicacao_configura_logs_antes_da_configuracao(monkeypatch):
         fonte_dados="http://api",
         azure_sql_connectionstring="Server=teste",
         chave_criptografia="chave",
-        pepper_hash="pepper",
+        chave_hash="chave-hash",
     )
-    monkeypatch.setattr(main, "configurar_logs", lambda: chamadas.append("logs"))
+    monkeypatch.setattr(main, "configurar_logs", lambda etapa: chamadas.append(("logs", etapa)))
     monkeypatch.setattr(main, "load_config", lambda: chamadas.append("config") or settings)
     monkeypatch.setattr(
-        main, "configurar_seguranca", lambda chave, pepper: chamadas.append(("seguranca", chave, pepper))
+        main, "configurar_seguranca", lambda chave, chave_hash: chamadas.append(("seguranca", chave, chave_hash))
     )
 
-    assert main.iniciar_aplicacao() is settings
-    assert chamadas == ["logs", "config", ("seguranca", "chave", "pepper")]
+    assert main.iniciar_aplicacao("analise") is settings
+    assert chamadas == [("logs", "analise"), "config", ("seguranca", "chave", "chave-hash")]
+
+
+@pytest.mark.parametrize(
+    ("argv", "etapa"),
+    [(["--ingestao"], "ingestao"), (["--analise"], "analise"), ([], "consulta")],
+)
+def test_etapa_da_execucao_vem_dos_argumentos(argv, etapa):
+    assert main.etapa_da_execucao(main.ler_argumentos(argv)) == etapa

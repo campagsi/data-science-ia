@@ -2,10 +2,10 @@
 Único ponto de anonimização e criptografia de dados pessoais (LGPD).
 
 - CPF e nome: anonimização irreversível com SHA-256 (HMAC-SHA256 quando há
-  PEPPER_HASH configurado), sempre 64 caracteres hexadecimais.
+  CHAVE_HASH configurada), sempre 64 caracteres hexadecimais.
 - E-mail: criptografia reversível com Fernet (chave simétrica).
 
-As chaves vêm do .env (CHAVE_CRIPTOGRAFIA e PEPPER_HASH) e são entregues por
+As chaves vêm do .env (CHAVE_CRIPTOGRAFIA e CHAVE_HASH) e são entregues por
 configurar_seguranca(), chamada uma vez no início da aplicação. Regras em
 docs/seguranca-lgpd.md.
 """
@@ -17,12 +17,12 @@ import re
 from cryptography.fernet import Fernet, InvalidToken
 
 __cifra: Fernet | None = None
-__pepper: bytes | None = None
+__chave_hash: bytes | None = None
 
 
-def configurar_seguranca(chave_criptografia: str, pepper_hash: str = "") -> None:
+def configurar_seguranca(chave_criptografia: str, chave_hash: str = "") -> None:
     """Registra as chaves usadas pelas funções deste módulo."""
-    global __cifra, __pepper
+    global __cifra, __chave_hash
 
     try:
         cifra = Fernet(chave_criptografia.encode("utf-8"))
@@ -34,22 +34,22 @@ def configurar_seguranca(chave_criptografia: str, pepper_hash: str = "") -> None
         ) from error
 
     __cifra = cifra
-    __pepper = (pepper_hash or "").encode("utf-8")
+    __chave_hash = (chave_hash or "").encode("utf-8")
 
 
 def __configuracao() -> tuple[Fernet, bytes]:
-    if __cifra is None or __pepper is None:
+    if __cifra is None or __chave_hash is None:
         raise RuntimeError(
             "Segurança não configurada: chame configurar_seguranca() no início da aplicação."
         )
-    return __cifra, __pepper
+    return __cifra, __chave_hash
 
 
 def __gerar_hash(valor: str) -> str:
-    _, pepper = __configuracao()
+    _, chave_hash = __configuracao()
     dados = valor.encode("utf-8")
-    if pepper:
-        return hmac.new(pepper, dados, hashlib.sha256).hexdigest()
+    if chave_hash:
+        return hmac.new(chave_hash, dados, hashlib.sha256).hexdigest()
     return hashlib.sha256(dados).hexdigest()
 
 

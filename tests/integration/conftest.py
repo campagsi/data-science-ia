@@ -133,7 +133,7 @@ def normalizados():
     from src.security import configurar_seguranca
     from src.services.normalization_service import NormalizationService
 
-    configurar_seguranca(os.environ["CHAVE_CRIPTOGRAFIA"], os.environ["PEPPER_HASH"])
+    configurar_seguranca(os.environ["CHAVE_CRIPTOGRAFIA"], os.environ["CHAVE_HASH"])
     return NormalizationService().normalize(DatasetRepository().get_all())
 
 

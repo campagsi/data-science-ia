@@ -30,7 +30,7 @@ Prepara o ambiente e concentra o que é transversal a todas as etapas.
 
 | Módulo | Responsabilidade |
 |---|---|
-| `src/config.py` | Lê o `.env`: `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, também gravada em `Leituras.fonte`), `CHAVE_CRIPTOGRAFIA` e `PEPPER_HASH`. Falha com mensagem clara, sem expor valores. |
+| `src/config.py` | Lê o `.env`: `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, também gravada em `Leituras.fonte`), `CHAVE_CRIPTOGRAFIA` e `CHAVE_HASH`. Falha com mensagem clara, sem expor valores. |
 | `src/security.py` | **Único** ponto de anonimização (SHA-256/HMAC de CPF e nome) e criptografia (Fernet do e-mail). |
 | `src/logger.py` | **Único** ponto de configuração de log: execução (console + arquivo) e rejeitados (só arquivo), no formato `data - [NÍVEL] - mensagem`. |
 

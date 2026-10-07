@@ -31,9 +31,9 @@ Toda anonimização e criptografia passa por **um único módulo**, no mesmo for
 Diferenças em relação ao exemplo:
 
 - **A chave não fica no código.** No exemplo, `CHAVE_MESTRA` está fixa no arquivo; aqui ela vem da variável `CHAVE_CRIPTOGRAFIA` do `.env` (lida pelo `src/config.py`). É uma chave Fernet (Base64 de 32 bytes), gerada com `Fernet.generate_key()`. Se ela faltar, o pipeline não inicia.
-- **Hash com pepper (decisão D8).** O CPF tem só 10¹¹ combinações, então um SHA-256 puro pode ser revertido por força bruta. Com `PEPPER_HASH` preenchido no `.env`, o módulo usa HMAC-SHA256 com esse segredo; com ele vazio, usa SHA-256 puro, como no exemplo. Nos dois casos, o resultado tem 64 caracteres e cabe no DDL atual.
-- **Configuração explícita.** As chaves chegam ao módulo por `configurar_seguranca(chave, pepper)`, chamada em `iniciar_aplicacao()` no `main.py`. Chamar qualquer função antes disso gera erro, para evitar hash sem pepper por esquecimento.
-- **Uma chave para o time.** A `CHAVE_CRIPTOGRAFIA` e o `PEPPER_HASH` precisam ser os mesmos em todas as máquinas que gravam no banco. Com valores diferentes, o mesmo CPF gera outro hash e os e-mails gravados por outra máquina não podem ser lidos.
+- **Hash com chave secreta (decisão D8).** O CPF tem só 10¹¹ combinações, então um SHA-256 puro pode ser revertido por força bruta. Com `CHAVE_HASH` preenchida no `.env`, o módulo usa HMAC-SHA256 com esse segredo; com ela vazia, usa SHA-256 puro, como no exemplo. Nos dois casos, o resultado tem 64 caracteres e cabe no DDL atual.
+- **Configuração explícita.** As chaves chegam ao módulo por `configurar_seguranca(chave, chave_hash)`, chamada em `iniciar_aplicacao()` no `main.py`. Chamar qualquer função antes disso gera erro, para evitar hash sem a `CHAVE_HASH` por esquecimento.
+- **Uma chave para o time.** A `CHAVE_CRIPTOGRAFIA` e a `CHAVE_HASH` precisam ser as mesmas em todas as máquinas que gravam no banco. Com valores diferentes, o mesmo CPF gera outro hash e os e-mails gravados por outra máquina não podem ser lidos.
 - **Retorno `None` para vazio**, como no exemplo, permite que a checagem de campos nulos (completude) funcione sobre os campos já anonimizados.
 
 Pontos de atenção:
@@ -59,18 +59,19 @@ Como o dado em claro deixa de existir no registro depois do passo 3, nenhuma eta
 
 A configuração de log também fica em **um único lugar**, no padrão de `transform.py` e `01_ingestao_api.py`:
 
-- `logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s', handlers=[...])`, chamado **uma vez** no início do `main.py`;
+- `logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s', handlers=[...])`, chamado **uma vez** no início do `main.py` por `configurar_logs(etapa)`;
 - loggers nomeados, como `logging.getLogger('TechDados_Logger')` do exemplo:
   - `DataScienceIA_Logger`: execução do pipeline (console + `logs/pipeline_AAAAMMDD_HHMMSS.log`);
   - `DataScienceIA_Rejeitados`: tudo o que não foi importado (`logs/rejeitados_AAAAMMDD_HHMMSS.log`);
-- cada módulo só faz `logger = logging.getLogger('DataScienceIA_Logger')` e nunca chama `basicConfig` nem `print`.
+- cada módulo só faz `logger = logging.getLogger('DataScienceIA_Logger')` e nunca chama `basicConfig` nem `print`;
+- cada arquivo começa com um cabeçalho (`[cabeçalho]`) que diz qual etapa o criou (ingestão, análise, consulta ou coleta), por quê e o que contém; o de rejeitados de uma etapa que não importa dados fica só com o cabeçalho.
 
 O formato das linhas de rejeitados e os níveis de severidade estão na seção 6 de [analise-implementacao.md](analise-implementacao.md).
 
 ## Regras
 
 - Nunca registrar em log CPF, nome, e-mail, hash ou token de criptografia. Para identificar o operador, usar só `operador_codigo`.
-- Nunca registrar tokens, senhas, string de conexão, `CHAVE_CRIPTOGRAFIA` ou `PEPPER_HASH`.
+- Nunca registrar tokens, senhas, string de conexão, `CHAVE_CRIPTOGRAFIA` ou `CHAVE_HASH`.
 - Manter credenciais e chaves apenas em variáveis de ambiente ou secret manager; o `.env.example` traz só os nomes das variáveis.
 - `logs/` e os arquivos de dados de `data_lake/` ficam fora do Git.
 - Restringir o acesso ao banco, à pasta `data_lake/bronze/` e aos logs.

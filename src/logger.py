@@ -28,21 +28,60 @@ CAMPOS_PESSOAIS = frozenset(
     }
 )
 
+# Marca as linhas do cabeçalho de cada arquivo (etapa que o criou e por quê).
+MARCADOR_CABECALHO = "[cabeçalho]"
+
+_SO_LEITURA = "nenhum. Esta etapa não importa dados, por isso o arquivo tem só este cabeçalho"
+
+# Etapa → como foi executada, o que faz e o que cada arquivo registra.
+ETAPAS = {
+    "ingestao": {
+        "execucao": "Ingestão (python main.py --ingestao)",
+        "objetivo": "coleta o lote na API, normaliza, anonimiza, valida e grava no banco 3FN",
+        "pipeline": "andamento, avisos, erros e a linha 'Resumo da ingestão' com recebidos, "
+                    "válidos, inválidos e gravados. O que não foi importado está em {rejeitados}",
+        "rejeitados": "uma linha por leitura recusada (nivel=leitura) ou medição descartada "
+                      "(nivel=item), com etapa, campo e motivo; valores pessoais nunca aparecem",
+    },
+    "analise": {
+        "execucao": "Análise estatística (python main.py --analise)",
+        "objetivo": "lê as medições gravadas, calcula as métricas e sinaliza anomalias (IQR e Z-Score)",
+        "pipeline": "o relatório estatístico em INFO e uma linha WARNING 'Alerta de qualidade' "
+                    "por medição anômala",
+        "rejeitados": _SO_LEITURA,
+    },
+    "consulta": {
+        "execucao": "Consulta interativa (python main.py)",
+        "objetivo": "abre a CLI de consulta às métricas e anomalias do banco",
+        "pipeline": "início da aplicação e eventuais erros; as consultas aparecem só na tela",
+        "rejeitados": _SO_LEITURA,
+    },
+    "coleta": {
+        "execucao": "Coleta avulsa (python -m src.ingestion.importar_dados)",
+        "objetivo": "só busca o lote na API para conferência, sem validar nem gravar",
+        "pipeline": "tentativas de conexão com a API e a quantidade de registros recebidos",
+        "rejeitados": _SO_LEITURA,
+    },
+}
+
 logger = logging.getLogger(NOME_LOGGER)
 logger_rejeitados = logging.getLogger(NOME_LOGGER_REJEITADOS)
 
 __rejeicoes: Counter = Counter()
 
 
-def configurar_logs(pasta: Path | None = None) -> dict[str, Path]:
+def configurar_logs(etapa: str, pasta: Path | None = None) -> dict[str, Path]:
     """
     Configura o log da execução (console + arquivo) e o log de rejeitados.
 
-    Deve ser chamada uma única vez, no início do main.py. A pasta padrão é
-    logs/ na raiz do projeto; a variável de ambiente PASTA_LOGS a substitui
-    (usada pelos testes para não misturar seus arquivos com os de cargas reais).
-    Retorna o caminho dos dois arquivos criados.
+    Deve ser chamada uma única vez, no início da execução. etapa (chave de
+    ETAPAS) identifica quem criou os arquivos: ela vai para o cabeçalho de
+    cada um. A pasta padrão é logs/ na raiz do projeto; a variável de ambiente
+    PASTA_LOGS a substitui (usada pelos testes para não misturar seus arquivos
+    com os de cargas reais). Retorna o caminho dos dois arquivos criados.
     """
+    if etapa not in ETAPAS:
+        raise ValueError(f"Etapa de log desconhecida: {etapa}")
     pasta = Path(pasta or os.environ.get("PASTA_LOGS") or PASTA_LOGS)
     pasta.mkdir(parents=True, exist_ok=True)
 
@@ -74,8 +113,40 @@ def configurar_logs(pasta: Path | None = None) -> dict[str, Path]:
     logger_rejeitados.setLevel(logging.INFO)
     logger_rejeitados.propagate = False
 
+    __escrever_cabecalho(etapa, arquivos)
     __rejeicoes.clear()
     return arquivos
+
+
+def __escrever_cabecalho(etapa: str, arquivos: dict[str, Path]) -> None:
+    """
+    Primeiras linhas de cada arquivo: etapa que o criou, por quê e o que contém.
+
+    Saem no mesmo formato das demais (data - [INFO] - mensagem), marcadas com
+    MARCADOR_CABECALHO, e só nos arquivos, sem passar pelo console.
+    """
+    descricao = ETAPAS[etapa]
+    comum = [
+        f"Etapa: {descricao['execucao']}.",
+        "Por que existe: cada execução cria um par de arquivos (pipeline e rejeitados) "
+        f"com a data/hora de início no nome; esta execução {descricao['objetivo']}.",
+    ]
+    linhas = {
+        "pipeline": comum + [
+            f"Conteúdo: {descricao['pipeline'].format(rejeitados=arquivos['rejeitados'].name)}."
+        ],
+        "rejeitados": comum + [f"Conteúdo: {descricao['rejeitados']}."],
+    }
+    alvos = {
+        "pipeline": [h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler)],
+        "rejeitados": logger_rejeitados.handlers,
+    }
+    for nome, handlers in alvos.items():
+        for texto in linhas[nome]:
+            registro = logging.LogRecord(NOME_LOGGER, logging.INFO, __file__, 0,
+                                         f"{MARCADOR_CABECALHO} {texto}", None, None)
+            for handler in handlers:
+                handler.handle(registro)
 
 
 def registrar_rejeicao(
