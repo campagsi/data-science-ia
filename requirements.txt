@@ -7,3 +7,5 @@ requests
 pandas
 pytest
 pytest-cov
+cryptography
+rich

@@ -1,322 +1,167 @@
+"""
+Análise estatística das medições gravadas no modelo 3FN (item 3.4 do enunciado).
+
+Agrupa por estação + parâmetro (um parâmetro tem uma única unidade, então os
+grupos nunca misturam unidades) e sinaliza as medições anômalas sem removê-las.
+As regras estão em docs/analise-estatistica.md.
+"""
 from datetime import date
-from typing import ClassVar
+from typing import Any
 
 import pandas as pd
 
 from src.database import DatabaseConnection
-from src.repository import CidadeRepository, EstacaoRepository, LeituraRepository
+from src.models import EstacaoModel
+from src.repository import EstacaoRepository, LeituraRepository, MunicipioRepository
+
+# D10: anômala se fora do intervalo IQR ou com |Z| acima do limite.
+LIMITE_ZSCORE = 3.0
+# Abaixo disso os quartis não são representativos e a regra IQR não é aplicada.
+MINIMO_VALORES_IQR = 4
+
+ALERTA_IQR = "IQR"
+ALERTA_ZSCORE = "ZSCORE"
+ALERTA_AMBOS = "IQR+ZSCORE"
 
 
 class AnaliticsService:
-    __COLUNAS_OUTLIERS = (
-        "Estação",
-        "Variável",
-        "Data",
-        "Valor",
-        "Limite Inferior",
-        "Limite Superior",
-    )
-
-    __COLUNAS: ClassVar[dict[str, tuple[str, ...]]] = {
-        "meteriologico": (
-            "temperatura",
-            "pressao",
-            "umidade",
-            "precipitacao",
-            "velocidade_vento",
-            "radiacao_solar",
-        ),
-        "qualidade_agua": (
-            "temperatura_agua",
-            "ph",
-            "oxigenio_dissolvido",
-            "condutividade",
-            "turbidez",
-        ),
-    }
-
-    __NOMES: ClassVar[dict[str, dict[str, str]]] = {
-        "meteriologico": {
-            "temperatura": "Temperatura do ar",
-            "umidade": "Umidade relativa do ar",
-            "pressao": "Pressão atmosférica ao nível do mar",
-            "precipitacao": "Chuva acumulada em 12 horas",
-            "velocidade_vento": "Velocidade do vento",
-            "direcao_vento": "Direção de origem do vento",
-            "radiacao_solar": "Radiação solar",
-        },
-        "qualidade_agua": {
-            "temperatura_agua": "Temperatura da água",
-            "ph": "pH",
-            "oxigenio_dissolvido": "Oxigênio dissolvido",
-            "condutividade": "Condutividade elétrica a 25 °C",
-            "turbidez": "Turbidez",
-        },
-    }
-
-    __UNIDADES: ClassVar[dict[str, dict[str, str]]] = {
-        "meteriologico": {
-            "temperatura": "°C",
-            "umidade": "%",
-            "pressao": "hPa",
-            "precipitacao": "mm",
-            "velocidade_vento": "km/h",
-            "radiacao_solar": "W/m²",
-        },
-        "qualidade_agua": {
-            "temperatura_agua": "°C",
-            "ph": "ph",
-            "oxigenio_dissolvido": "mg/L",
-            "condutividade": "µS/cm",
-            "turbidez": "NTU",
-        },
-    }
-
     def __init__(self, database: DatabaseConnection | None = None) -> None:
         self.__leitura_repository = LeituraRepository(database)
-        self.__cidade_repository = CidadeRepository(database)
+        self.__municipio_repository = MunicipioRepository(database)
         self.__estacao_repository = EstacaoRepository(database)
 
-    def __preparar_dataframe(self, dados: list[dict], tipo=str) -> pd.DataFrame:
-        df = pd.DataFrame(dados or [])
+    def buscar_municipios(self) -> list[dict]:
+        """Municípios com estação: [{"id", "nome", "sigla"}]."""
+        return self.__municipio_repository.get_com_estacoes()
 
-        if df.empty:
-            return df
+    def buscar_estacoes(self, municipio_id: int) -> list[EstacaoModel]:
+        return self.__estacao_repository.get_by_municipio(municipio_id)
 
-        colunas = list(self.__COLUNAS[tipo])
-
-        # Converte somente as medições, preservando data_hora.
-        df[colunas] = df[colunas].apply(
-            pd.to_numeric,
-            errors="coerce",
-        )
-
-        return df
-
-    def __analisar_leituras(self, df: pd.DataFrame, tipo="") -> dict:
-        if df.empty:
-            return "Não há dados a serem analisados.\nLeituras: 0\nEstatisticas: []"
-
-        colunas = self.__COLUNAS[tipo]
-        nomes = self.__NOMES[tipo]
-        unidades = self.__UNIDADES[tipo]
-
-        resumo = df[list(colunas)].agg(["count", "mean", "median", "std"]).T.round(2)
-
-        resumo = resumo.rename(
-            columns={
-                "count": "Quantidade",
-                "mean": "Média",
-                "median": "Mediana",
-                "std": "Desvio Padrão",
-            }
-        )
-
-        resumo.rename_axis("variavel").reset_index()
-
-        resumo = resumo.rename_axis("variavel").reset_index()
-        # Faz o mapeamento antes de substituir os nomes originais.
-        resumo.insert(1, "Unidade", resumo["variavel"].map(unidades))
-        resumo["variavel"] = resumo["variavel"].replace(nomes)
-
-        resumo = resumo.rename(columns={"variavel": "Medição"})
-        resumo["Quantidade"] = resumo["Quantidade"].astype(int)
-
-        resumo = resumo.astype(object).where(resumo.notna(), None)
-
-        return {
-            "Quantide Leituras": len(df),
-            "Estatísticas": resumo.to_dict(orient="records"),
-        }
-
-    def __identificar_outliers(self, df: pd.DataFrame, tipo: str) -> pd.DataFrame:
-        colunas_resultado = list(self.__COLUNAS_OUTLIERS)
-        colunas = self.__COLUNAS[tipo]
-
-        if df.empty:
-            return pd.DataFrame(columns=colunas_resultado)
-
-        valores = df[list(colunas)]
-
-        # Verifica se existe pelo menos 4 valores válidos por variável
-        valores = valores.loc[:, valores.count() >= 4]
-
-        if valores.empty:
-            return pd.DataFrame(columns=colunas_resultado)
-
-        # Calcula os limites
-        q1 = valores.quantile(0.25)
-        q3 = valores.quantile(0.75)
-
-        iqr = q3 - q1
-
-        limite_inferior = q1 - 1.5 * iqr
-        limite_superior = q3 + 1.5 * iqr
-
-        # Transforma as colunas de medições em linhas.
-        registros = valores.copy()
-
-        registros["Data"] = df["data_hora"]
-        id_vars = ["Data"]
-        colunas_resultado = list(self.__COLUNAS_OUTLIERS)
-
-        if "estacao" in df.columns:
-            registros["Estação"] = df["estacao"]
-            id_vars.append("Estação")
-        else:
-            colunas_resultado.remove("Estação")
-
-        registros = registros.melt(
-            id_vars=id_vars,
-            var_name="Variável",
-            value_name="Valor",
-        )
-
-        # Associa cada variável aos seus limites.
-        registros["Limite Inferior"] = registros["Variável"].map(limite_inferior)
-        registros["Limite Superior"] = registros["Variável"].map(limite_superior)
-
-        mascara = (registros["Valor"] < registros["Limite Inferior"]) | (
-            registros["Valor"] > registros["Limite Superior"]
-        )
-
-        return (
-            registros.loc[mascara, colunas_resultado]
-            .sort_values(["Variável", "Data", "Valor"])
-            .to_dict(orient="records")
-        )
-
-    def analisar_leituras_meteriologicas_cidade(
-        self,
-        cidade_id: int,
-        data_inicio: date | None = None,
-        data_fim: date | None = None,
-    ) -> tuple[dict, pd.DataFrame]:
-        dados = self.__leitura_repository.get_leituras_meteorologicas_by_cidade(
-            cidade_id,
-            data_inicio,
-            data_fim,
-        )
-
-        tipo = "meteriologico"
-
-        df = self.__preparar_dataframe(dados, tipo)
-
-        estatisticas = self.__analisar_leituras(df, tipo)
-        outliers = self.__identificar_outliers(df, tipo)
-
-        return estatisticas, outliers
-
-    def analisar_leituras_qualidade_agua_cidade(
-        self,
-        cidade_id: int,
-        data_inicio: date | None = None,
-        data_fim: date | None = None,
-    ) -> tuple[dict, pd.DataFrame]:
-        dados = self.__leitura_repository.get_leituras_qualidade_agua_by_cidade(
-            cidade_id,
-            data_inicio,
-            data_fim,
-        )
-
-        tipo = "qualidade_agua"
-
-        df = self.__preparar_dataframe(dados, tipo)
-
-        estatisticas = self.__analisar_leituras(df, tipo)
-        outliers = self.__identificar_outliers(df, tipo)
-
-        return estatisticas, outliers
-
-    def analisar_leituras_meteriologicas_estacao(
-        self,
-        estacao_id: int,
-        data_inicio: date | None = None,
-        data_fim: date | None = None,
-    ) -> tuple[dict, pd.DataFrame]:
-        dados = self.__leitura_repository.get_leituras_meteorologicas_by_estacao(
-            estacao_id,
-            data_inicio,
-            data_fim,
-        )
-
-        tipo = "meteriologico"
-
-        df = self.__preparar_dataframe(dados, tipo)
-
-        estatisticas = self.__analisar_leituras(df, tipo)
-        outliers = self.__identificar_outliers(df, tipo)
-
-        return estatisticas, outliers
-
-    def analisar_leituras_qualidade_agua_estacao(
-        self,
-        estacao_id: int,
-        data_inicio: date | None = None,
-        data_fim: date | None = None,
-    ) -> tuple[dict, pd.DataFrame]:
-        dados = self.__leitura_repository.get_leituras_qualidade_agua_by_estacao(
-            estacao_id,
-            data_inicio,
-            data_fim,
-        )
-
-        tipo = "qualidade_agua"
-
-        df = self.__preparar_dataframe(dados, tipo)
-
-        estatisticas = self.__analisar_leituras(df, tipo)
-        outliers = self.__identificar_outliers(df, tipo)
-
-        return estatisticas, outliers
-
-    def buscar_estacao_by_cidade_id(self, id: int):
-        result = self.__estacao_repository.get_estacao_cidade(id)
-        return result
-
-    def buscar_cidades(self):
-        result = self.__cidade_repository.get_all()
-        return result
+    def buscar_estacao_por_codigo(self, codigo_estacao: str) -> EstacaoModel | None:
+        return self.__estacao_repository.get_by_codigo(codigo_estacao)
 
     def calculate_metrics(
         self,
-        cidade_id: int | None = None,
         estacao_id: int | None = None,
+        municipio_id: int | None = None,
         data_inicio: date | None = None,
         data_fim: date | None = None,
-    ) -> dict:
-        """Consolida as análises existentes por cidade ou por estação."""
-        if cidade_id is None and estacao_id is None:
-            raise ValueError("Informe cidade_id ou estacao_id para calcular as métricas.")
-        if cidade_id is not None and estacao_id is not None:
-            raise ValueError("Informe somente um escopo de análise.")
-
-        if cidade_id is not None:
-            analise_meteorologica = self.analisar_leituras_meteriologicas_cidade(
-                cidade_id, data_inicio, data_fim
-            )
-            analise_qualidade_agua = self.analisar_leituras_qualidade_agua_cidade(
-                cidade_id, data_inicio, data_fim
-            )
-            escopo = {"cidade_id": cidade_id}
-        else:
-            analise_meteorologica = self.analisar_leituras_meteriologicas_estacao(
-                estacao_id, data_inicio, data_fim
-            )
-            analise_qualidade_agua = self.analisar_leituras_qualidade_agua_estacao(
-                estacao_id, data_inicio, data_fim
-            )
-            escopo = {"estacao_id": estacao_id}
-
+    ) -> dict[str, Any]:
+        """
+        Lê as medições do recorte (sem filtro = todas as estações) e devolve
+        escopo, período, estatísticas e anomalias (ver analisar_medicoes).
+        """
+        medicoes = self.__leitura_repository.get_medicoes(
+            estacao_id=estacao_id,
+            municipio_id=municipio_id,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+        )
+        escopo = {
+            chave: valor
+            for chave, valor in (("estacao_id", estacao_id), ("municipio_id", municipio_id))
+            if valor is not None
+        }
         return {
             "escopo": escopo,
             "periodo": {"data_inicio": data_inicio, "data_fim": data_fim},
-            "meteorologica": {
-                "analise": analise_meteorologica[0],
-                "outliers": analise_meteorologica[1],
-            },
-            "qualidade_agua": {
-                "analise": analise_qualidade_agua[0],
-                "outliers": analise_qualidade_agua[1],
-            },
+            **self.analisar_medicoes(medicoes),
         }
+
+    @staticmethod
+    def analisar_medicoes(medicoes: list[dict]) -> dict[str, Any]:
+        """
+        Estatísticas e anomalias por estação + parâmetro.
+
+        medicoes: linhas de LeituraRepository.get_medicoes().
+        Devolve:
+        - "leituras": leituras distintas analisadas;
+        - "medicoes": quantidade de valores;
+        - "estatisticas": uma linha por estação + parâmetro (média, mediana,
+          desvio padrão e variância amostrais, Q1, Q3, IQR, mínimo, máximo,
+          limites IQR e quantidade de anomalias);
+        - "anomalias": uma linha por medição anômala, com o indicador de
+          alerta de qualidade (IQR, ZSCORE ou IQR+ZSCORE) e o Z-Score.
+        """
+        df = pd.DataFrame(medicoes)
+        if df.empty:
+            return {"leituras": 0, "medicoes": 0, "estatisticas": [], "anomalias": []}
+
+        chaves = ["estacao_codigo", "codigo_parametro"]
+        grupos = df.groupby(chaves, sort=True)["valor"]
+
+        resumo = grupos.agg(
+            quantidade="count", media="mean", mediana="median", desvio="std",
+            variancia="var", minimo="min", maximo="max",
+        )
+        resumo["q1"] = grupos.quantile(0.25)
+        resumo["q3"] = grupos.quantile(0.75)
+        resumo["iqr"] = resumo["q3"] - resumo["q1"]
+        com_iqr = resumo["quantidade"] >= MINIMO_VALORES_IQR
+        resumo["limite_inferior"] = (resumo["q1"] - 1.5 * resumo["iqr"]).where(com_iqr)
+        resumo["limite_superior"] = (resumo["q3"] + 1.5 * resumo["iqr"]).where(com_iqr)
+
+        df = df.join(resumo, on=chaves)
+        # Desvio zero ou um único valor: Z-Score indefinido (NaN), sem alerta.
+        df["zscore"] = (df["valor"] - df["media"]) / df["desvio"].where(df["desvio"] > 0)
+        df["fora_iqr"] = (df["valor"] < df["limite_inferior"]) | (df["valor"] > df["limite_superior"])
+        df["fora_zscore"] = df["zscore"].abs() > LIMITE_ZSCORE
+        df["alerta"] = None
+        df.loc[df["fora_iqr"], "alerta"] = ALERTA_IQR
+        df.loc[df["fora_zscore"], "alerta"] = ALERTA_ZSCORE
+        df.loc[df["fora_iqr"] & df["fora_zscore"], "alerta"] = ALERTA_AMBOS
+
+        anomalas = df[df["alerta"].notna()]
+        resumo["anomalias"] = anomalas.groupby(chaves).size().reindex(resumo.index, fill_value=0)
+        descricao = df.drop_duplicates(chaves).set_index(chaves)[["estacao", "parametro", "unidade_medida"]]
+        resumo = resumo.join(descricao).reset_index()
+
+        estatisticas = [
+            {
+                "Estação": linha.estacao,
+                "Código": linha.codigo_parametro,
+                "Parâmetro": linha.parametro,
+                "Unidade": linha.unidade_medida,
+                "Quantidade": int(linha.quantidade),
+                "Média": linha.media,
+                "Mediana": linha.mediana,
+                "Desvio Padrão": linha.desvio,
+                "Variância": linha.variancia,
+                "Q1": linha.q1,
+                "Q3": linha.q3,
+                "IQR": linha.iqr,
+                "Mínimo": linha.minimo,
+                "Máximo": linha.maximo,
+                "Limite Inferior": linha.limite_inferior,
+                "Limite Superior": linha.limite_superior,
+                "Anomalias": int(linha.anomalias),
+            }
+            for linha in resumo.itertuples(index=False)
+        ]
+        anomalias = [
+            {
+                "Estação": linha.estacao,
+                "Parâmetro": linha.parametro,
+                "Unidade": linha.unidade_medida,
+                "Data": linha.data_hora,
+                "Registro": linha.codigo_registro,
+                "Valor": linha.valor,
+                "Limite Inferior": linha.limite_inferior,
+                "Limite Superior": linha.limite_superior,
+                "Z-Score": linha.zscore,
+                "Alerta": linha.alerta,
+            }
+            for linha in anomalas.sort_values(chaves + ["data_hora"]).itertuples(index=False)
+        ]
+
+        return {
+            "leituras": int(df["codigo_registro"].nunique()),
+            "medicoes": len(df),
+            "estatisticas": [_sem_nan(linha) for linha in estatisticas],
+            "anomalias": [_sem_nan(linha) for linha in anomalias],
+        }
+
+
+def _sem_nan(linha: dict) -> dict:
+    """Troca NaN por None (valor indefinido, ex.: desvio de um único valor)."""
+    return {chave: None if isinstance(valor, float) and pd.isna(valor) else valor for chave, valor in linha.items()}

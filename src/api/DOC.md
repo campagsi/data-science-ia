@@ -377,20 +377,20 @@ http://127.0.0.1:8000/docs
 
 ## 10. Integracao com a ingestao
 
-O pipeline carrega a variavel `MOCK_API` em `src/config.py` e a
+O pipeline carrega a variavel `FONTE_DADOS` em `src/config.py` e a
 `DataClient` (`src/ingestion/data_client.py`) a usa para consultar a API:
 
 ```env
-MOCK_API="http://127.0.0.1:8000"
+FONTE_DADOS="http://127.0.0.1:8000"
 ```
 
 A ingestao monta a chamada para:
 
 ```text
-{MOCK_API}/api/v1/data-set
+{FONTE_DADOS}/api/v1/data-set
 ```
 
-`MOCK_API` e obrigatoria: sem ela, `load_config()` falha antes da ingestao.
+`FONTE_DADOS` e obrigatoria: sem ela, `load_config()` falha antes da ingestao. O mesmo valor e gravado em `Leituras.fonte` (maximo de 100 caracteres).
 O pipeline nao le o arquivo `data_set.json` diretamente; o arquivo e usado
 somente por esta API, que precisa estar em execucao durante o pipeline.
 

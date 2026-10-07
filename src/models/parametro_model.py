@@ -1,31 +1,21 @@
 from pydantic import BaseModel, Field
 
 
-class EstacaoModel(BaseModel):
+class ParametroModel(BaseModel):
     """
-    Modelo responsável por representar uma estação de monitoramento.
+    Modelo responsável por representar um parâmetro medido (tabela Parametros).
+
+    Os tamanhos seguem o sql/ddl_banco_relacional.sql.
     """
 
-    id_estacao: int | None = None
+    id_parametro: int | None = None
 
-    codigo_estacao: str = Field(
-        min_length=1,
-        max_length=50
-    )
+    codigo_parametro: str = Field(min_length=1, max_length=50)
 
-    nome: str = Field(
-        min_length=2,
-        max_length=150
-    )
+    nome: str = Field(min_length=1, max_length=100)
 
-    cidade_id: int
+    unidade_medida: str = Field(min_length=1, max_length=30)
 
-    latitude: float = Field(
-        ge=-90,
-        le=90
-    )
-
-    longitude: float = Field(
-        ge=-180,
-        le=180
-    )
+    # None = sem limite (parâmetro novo ainda sem faixa definida).
+    valor_minimo: float | None = None
+    valor_maximo: float | None = None

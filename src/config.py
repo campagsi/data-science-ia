@@ -4,11 +4,17 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# Leituras.fonte é VARCHAR(100) no sql/ddl_banco_relacional.sql.
+TAMANHO_MAXIMO_FONTE = 100
+
 
 @dataclass(frozen=True)
 class Settings:
-    mock_api: str
+    # URL da API de ingestão; também é o valor gravado em Leituras.fonte.
+    fonte_dados: str
     azure_sql_connectionstring: str
+    chave_criptografia: str = ""
+    chave_hash: str = ""
 
 
 def load_config() -> Settings:
@@ -19,11 +25,22 @@ def load_config() -> Settings:
     if not connection_string:
         raise ValueError("A variável AZURE_SQL_CONNECTIONSTRING deve estar configurada.")
 
-    mock_api = os.getenv("MOCK_API", "").strip()
-    if not mock_api:
-        raise ValueError("A variável MOCK_API deve estar configurada.")
+    fonte_dados = os.getenv("FONTE_DADOS", "").strip()
+    if not fonte_dados:
+        raise ValueError("A variável FONTE_DADOS deve estar configurada.")
+    if len(fonte_dados) > TAMANHO_MAXIMO_FONTE:
+        raise ValueError(
+            f"A variável FONTE_DADOS deve ter no máximo {TAMANHO_MAXIMO_FONTE} caracteres."
+        )
+
+    chave_criptografia = os.getenv("CHAVE_CRIPTOGRAFIA", "").strip()
+    if not chave_criptografia:
+        raise ValueError("A variável CHAVE_CRIPTOGRAFIA deve estar configurada.")
 
     return Settings(
-        mock_api=mock_api,
+        fonte_dados=fonte_dados,
         azure_sql_connectionstring=connection_string,
+        chave_criptografia=chave_criptografia,
+        # Opcional: sem a chave de hash, o hash é SHA-256 puro (decisão D8).
+        chave_hash=os.getenv("CHAVE_HASH", "").strip(),
     )

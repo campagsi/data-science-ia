@@ -86,6 +86,39 @@ class DatabaseConnection:
         except Exception as error:
             raise RuntimeError(f"Erro ao executar operação em lote: {error}") from error
 
+    # O SQL Server aceita no máximo 2100 parâmetros por comando.
+    __MAX_PARAMETROS = 2000
+
+    def insert_em_lotes(self, tabela: str, colunas: tuple[str, ...], linhas: list[tuple]) -> int:
+        """
+        Insere muitas linhas com INSERT de várias linhas por comando.
+
+        Evita uma ida ao banco por linha (executemany) em cargas grandes.
+        `tabela` e `colunas` vêm do código, nunca do payload; os valores
+        sempre vão como parâmetros.
+
+        Exemplo:
+            insert_em_lotes("#itens", ("codigo_registro", "parametro_id", "valor"), linhas)
+        """
+        if not linhas:
+            return 0
+
+        por_comando = max(1, self.__MAX_PARAMETROS // len(colunas))
+        marcadores = "(" + ", ".join("?" * len(colunas)) + ")"
+        inseridas = 0
+
+        for inicio in range(0, len(linhas), por_comando):
+            lote = linhas[inicio:inicio + por_comando]
+            sql = (
+                f"INSERT INTO {tabela} ({', '.join(colunas)}) VALUES "
+                + ", ".join([marcadores] * len(lote))
+            )
+            parametros = tuple(valor for linha in lote for valor in linha)
+            self.execute(sql, parametros)
+            inseridas += len(lote)
+
+        return inseridas
+
     def fetch_one(self, sql: str, params: tuple = ()):
         """Executa um SELECT e retorna somente um registro."""
         try:
