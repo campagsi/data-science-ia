@@ -2,50 +2,89 @@
 Execução de ponta a ponta de run_pipeline() com o dataset da API e banco de teste.
 
 A coleta HTTP é substituída pela leitura do mesmo arquivo servido pela API
-(DatasetRepository), para o teste não depender do servidor uvicorn.
+(DatasetRepository), para o teste não depender do servidor uvicorn. Cobre as
+conferências da fase 9 de docs/todo-idempotencia.md.
 """
+import re
+from collections import Counter
+
 import pytest
 
 import main
 import src.config as config
 from src.api.dataset_repository import DatasetRepository
 from src.services.normalization_service import NormalizationService
-from src.services.validation_service import ValidationService
 
 
 @pytest.fixture
-def pipeline(monkeypatch, database, connection_string):
+def pipeline(monkeypatch, database, connection_string, seguranca, logs_temporarios):
+    """Prepara run_pipeline() para o banco de teste e devolve o leitor de logs."""
     monkeypatch.setattr(config, "load_dotenv", lambda *args, **kwargs: None)
     monkeypatch.setenv("AZURE_SQL_CONNECTIONSTRING", connection_string)
-    monkeypatch.setenv("MOCK_API", "http://api-de-teste")
-
-    def usar_dataset(dados):
-        monkeypatch.setattr(main.DataClient, "fetch_data", lambda self: dados)
-
-    return usar_dataset
-
-
-def test_pipeline_com_registros_completos_gera_relatorio(pipeline, contagens, capsys):
+    monkeypatch.setenv("FONTE_DADOS", "http://api-de-teste")
     dataset = DatasetRepository().get_all()
-    obrigatorios = ValidationService._REQUIRED_FIELDS + NormalizationService._FLOAT_FIELDS
-    pipeline([r for r in dataset if all(str(r.get(c, "")).strip() for c in obrigatorios)])
-
-    relatorio = main.run_pipeline()
-    main._exibir_resultados(relatorio)
-
-    assert contagens()["Leituras"] > 0
-    assert relatorio["escopo"] == {"cidade_id": 1}
-    assert set(relatorio["grupos"]) == {"meteorologica", "qualidade_agua"}
-    for grupo in relatorio["grupos"].values():
-        assert grupo["analise"]["Estatísticas"]
-    assert "Temperatura do ar" in capsys.readouterr().out
+    monkeypatch.setattr(main.DataClient, "fetch_data", lambda self: dataset)
+    return logs_temporarios
 
 
-def test_pipeline_com_dataset_atual_grava_medicoes_ausentes_como_nulo(pipeline, contagens):
-    """Os 82 registros com uma medição ausente são gravados com NULL nesse campo."""
-    dataset = DatasetRepository().get_all()
-    pipeline(dataset)
+def test_duas_execucoes_seguidas_geram_o_mesmo_banco(pipeline, contagens):
+    primeira = main.run_pipeline()
+    depois_da_primeira = contagens()
+    segunda = main.run_pipeline()
 
+    assert primeira == {
+        "recebidos": 9888,
+        "rejeitados_na_normalizacao": 0,
+        "registros_validos": 9806,
+        "registros_invalidos": 82,
+        "itens_descartados": 2681 + 603,
+        "leituras_gravadas": 9806,
+        "leituras_substituidas": 0,
+        "itens_gravados": 104582,
+    }
+    assert segunda == dict(primeira, leituras_substituidas=9806)
+    assert contagens() == depois_da_primeira
+    assert any("Resumo da ingestão: recebidos=9888" in linha for linha in pipeline("pipeline"))
+
+
+def test_banco_mais_rejeitados_fecha_com_o_recebido(pipeline, database, normalizados):
+    resumo = main.run_pipeline()
+    rejeitados = pipeline("rejeitados")
+
+    leituras_rejeitadas = {
+        re.search(r"registro=(\S+)", linha).group(1) for linha in rejeitados if "nivel=leitura" in linha
+    }
+    leituras_no_banco = database.fetch_one("SELECT COUNT(*) FROM dbo.Leituras")[0]
+    assert leituras_no_banco + len(leituras_rejeitadas) == resumo["recebidos"]
+
+    # Por parâmetro: itens gravados + itens rejeitados = leituras gravadas
+    # (cada leitura válida traz os 11 parâmetros).
+    codigo_do_campo = {
+        dados["campo"]: codigo
+        for codigo, dados in NormalizationService.descobrir_parametros(normalizados).items()
+    }
+    rejeitados_por_parametro = Counter(
+        codigo_do_campo[re.search(r"campo=(\S+)", linha).group(1)]
+        for linha in rejeitados
+        if "nivel=item" in linha
+    )
+    gravados_por_parametro = dict(
+        database.fetch_all(
+            "SELECT P.codigo_parametro, COUNT(*) FROM dbo.Leitura_Itens I "
+            "JOIN dbo.Parametros P ON P.id_parametro = I.parametro_id GROUP BY P.codigo_parametro"
+        )
+    )
+    assert len(gravados_por_parametro) == 11
+    for codigo, gravados in gravados_por_parametro.items():
+        assert gravados + rejeitados_por_parametro[codigo] == leituras_no_banco, codigo
+
+
+def test_logs_da_carga_nao_contem_dado_pessoal(pipeline):
     main.run_pipeline()
+    texto = "\n".join(pipeline("pipeline") + pipeline("rejeitados"))
 
-    assert contagens()["Leituras"] == len(dataset)
+    for registro in DatasetRepository().get_all():
+        for campo in ("operador_cpf", "operador_nome_completo", "operador_email"):
+            valor = (registro.get(campo) or "").strip()
+            if valor:
+                assert valor not in texto, campo

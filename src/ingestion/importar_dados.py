@@ -1,161 +1,127 @@
+"""
+Gravação das entidades do modelo 3FN a partir dos registros válidos.
+
+Cada função grava uma entidade de forma idempotente e devolve o mapa
+"chave natural → id" usado pela etapa seguinte. São chamadas, nesta ordem e
+na mesma transação, por LeituraRepository.save_readings().
+"""
 from src.config import load_config
 from src.database import DatabaseConnection
 from src.ingestion.data_client import DataClient
-from pydantic import ValidationError
-
-from src.models import CidadeModel, EstacaoModel, LeituraModel, OperadorModel
-from src.repository import (
-    CidadeRepository,
-    EstacaoRepository,
-    LeituraRepository,
-    OperadorRepository,
+from src.models import (
+    EstacaoModel,
+    LeituraItemModel,
+    LeituraModel,
+    MunicipioModel,
+    OperadorModel,
+    ParametroModel,
 )
+from src.repository.estacao_repository import EstacaoRepository
+from src.repository.leitura_repository import LeituraRepository
+from src.repository.municipio_repository import MunicipioRepository
+from src.repository.operador_repository import OperadorRepository
 
-__cidades = {}
-__operadores = {}
-__estacoes = {}
+
+def importar_municipios(
+    registros: list[dict], estados: dict[str, int], database: DatabaseConnection
+) -> dict[tuple[str, str], int]:
+    """
+    Grava os municípios do lote. estados: sigla → id_estado.
+
+    Devolve (municipio, sigla do estado) → id_municipio.
+    """
+    chaves = {(r["municipio"], r["cidade_estado"]) for r in registros}
+    repositorio = MunicipioRepository(database)
+    repositorio.merge_many(
+        [MunicipioModel(nome=nome, estado_id=estados[sigla]) for nome, sigla in sorted(chaves)]
+    )
+
+    # A collation do banco não diferencia maiúsculas: a busca também não.
+    ids = {(m.nome.casefold(), m.estado_id): m.id_municipio for m in repositorio.get_all()}
+    return {(nome, sigla): ids[(nome.casefold(), estados[sigla])] for nome, sigla in chaves}
 
 
-def importar_cidades(dados, database: DatabaseConnection | None = None):
-    try:
-        cidades_model_list: list[CidadeModel] = []
+def importar_operadores(
+    registros: list[dict], municipios: dict[tuple[str, str], int], database: DatabaseConnection
+) -> dict[str, int]:
+    """Grava os operadores (já anonimizados). Devolve codigo_operador → id_operador."""
+    operadores: dict[str, OperadorModel] = {}
+    for r in registros:
+        # A validação garante dados iguais para o mesmo código no lote.
+        operadores.setdefault(
+            r["operador_codigo"],
+            OperadorModel(
+                codigo_operador=r["operador_codigo"],
+                nome_hash=r["nome_hash"],
+                cpf_hash=r["cpf_hash"],
+                municipio_id=municipios[(r["municipio"], r["cidade_estado"])],
+                email_criptografado=r["email_criptografado"],
+            ),
+        )
 
-        for cidade in dados:
-            cidade_model = CidadeModel(
-                nome=cidade["cidade_nome"], estado=cidade["cidade_estado"]
+    repositorio = OperadorRepository(database)
+    repositorio.merge_many(list(operadores.values()))
+    ids = {o.codigo_operador: o.id_operador for o in repositorio.get_all()}
+    return {codigo: ids[codigo] for codigo in operadores}
+
+
+def importar_estacoes(
+    registros: list[dict], municipios: dict[tuple[str, str], int], database: DatabaseConnection
+) -> dict[str, int]:
+    """Grava as estações. Devolve codigo_estacao → id_estacao."""
+    estacoes: dict[str, EstacaoModel] = {}
+    for r in registros:
+        estacoes.setdefault(
+            r["estacao_codigo"],
+            EstacaoModel(
+                codigo_estacao=r["estacao_codigo"],
+                nome=r["estacao_nome"],
+                municipio_id=municipios[(r["municipio"], r["cidade_estado"])],
+                latitude=r["estacao_latitude"],
+                longitude=r["estacao_longitude"],
+            ),
+        )
+
+    repositorio = EstacaoRepository(database)
+    repositorio.merge_many(list(estacoes.values()))
+    ids = {e.codigo_estacao: e.id_estacao for e in repositorio.get_all()}
+    return {codigo: ids[codigo] for codigo in estacoes}
+
+
+def importar_leituras(
+    registros: list[dict],
+    operadores: dict[str, int],
+    estacoes: dict[str, int],
+    parametros: dict[str, ParametroModel],
+    fonte: str,
+    database: DatabaseConnection,
+) -> dict[str, int]:
+    """
+    Grava os cabeçalhos e as medições, substituindo as partições afetadas
+    (estação + dia). Os registros já chegam só com os itens válidos.
+    """
+    leituras = []
+    itens = []
+    for r in registros:
+        leituras.append(
+            LeituraModel(
+                codigo_registro=r["registro_codigo"],
+                operador_id=operadores[r["operador_codigo"]],
+                estacao_id=estacoes[r["estacao_codigo"]],
+                data_hora=r["data_hora_ciclo"],
+                fonte=fonte,
             )
-
-            if cidade_model not in cidades_model_list:
-                cidades_model_list.append(cidade_model)
-
-        CidadeRepository(database).create_many(cidades_model_list)
-    except ValidationError as error:
-        raise ValueError(
-            f"Dados inválidos na importação de Cidades: {error}"
-        ) from error
-    except BaseException as error:
-        raise RuntimeError(f"Falha ao importar Cidades: {error}") from error
-
-
-def importar_operadores(dados, database: DatabaseConnection | None = None):
-    try:
-        operadores_model_list: list[OperadorModel] = []
-
-        for item in dados:
-            nome = item["cidade_nome"]
-
-            if nome not in __cidades:
-                cidade = CidadeRepository(database).get_by_name(nome)
-                if cidade is None:
-                    raise ValueError(f"Cidade não encontrada: {nome}")
-                __cidades[nome] = cidade
-
-            cidade_id = __cidades[nome]["id"]
-
-            operador_model = OperadorModel(
-                codigo=item["operador_codigo"],
-                nome=item["operador_nome"],
-                tipo=item["operador_tipo"],
-                cidade_id=cidade_id,
+        )
+        itens += [
+            LeituraItemModel(
+                codigo_registro=r["registro_codigo"],
+                parametro_id=parametros[item["codigo_parametro"]].id_parametro,
+                valor=item["valor"],
             )
+            for item in r["itens"]
+        ]
 
-            if operador_model not in operadores_model_list:
-                operadores_model_list.append(operador_model)
-
-        OperadorRepository(database).create_many(operadores_model_list)
-    except ValidationError as error:
-        raise ValueError(
-            f"Dados inválidos na importação de Operadores: {error}"
-        ) from error
-    except BaseException as error:
-        raise RuntimeError(f"Falha ao importar Operadores: {error}") from error
-
-
-def importar_estacoes(dados, database: DatabaseConnection | None = None):
-    try:
-        estacoes_model_list: list[EstacaoModel] = []
-
-        for item in dados:
-            if item["cidade_nome"] not in __cidades:
-                cidade = CidadeRepository(database).get_by_name(item["cidade_nome"])
-                if cidade is None:
-                    raise ValueError(f"Cidade não encontrada: {item['cidade_nome']}")
-                __cidades[item["cidade_nome"]] = cidade
-
-            if item["operador_codigo"] not in __operadores:
-                operador = OperadorRepository(database).get_by_name(
-                    item["operador_nome"]
-                )
-                if operador is None:
-                    raise ValueError(f"Operador não encontrado: {item['operador_nome']}")
-                __operadores[item["operador_codigo"]] = operador
-
-            cidade_id = __cidades[item["cidade_nome"]]["id"]
-            operador_id = __operadores[item["operador_codigo"]]["id"]
-
-            estacao_model = EstacaoModel(
-                codigo=item["estacao_codigo"],
-                nome=item["estacao_nome"],
-                cidade_id=cidade_id,
-                operador_id=operador_id,
-                latitude=item["estacao_latitude"],
-                longitude=item["estacao_longitude"],
-                ativa=item["estacao_ativa"],
-                tipo=item["estacao_tipo"],
-            )
-
-            if estacao_model not in estacoes_model_list:
-                estacoes_model_list.append(estacao_model)
-
-        EstacaoRepository(database).create_many(estacoes_model_list)
-    except ValidationError as error:
-        raise ValueError(
-            f"Dados inválidos na importação de Estações: {error}"
-        ) from error
-    except BaseException as error:
-        raise RuntimeError(f"Falha ao importar Estações: {error}") from error
-
-
-def importar_leituras(dados, database: DatabaseConnection | None = None):
-    try:
-        leituras_model_list: list[LeituraModel] = []
-
-        for item in dados:
-            codigo = item["estacao_codigo"]
-
-            if codigo not in __estacoes:
-                estacao = EstacaoRepository(database).get_by_codigo(codigo)
-                if estacao is None:
-                    raise ValueError(f"Estação não encontrada: {codigo}")
-                __estacoes[codigo] = estacao
-
-            estacaoID = __estacoes[codigo]["id"]
-            leitura_model = LeituraModel(
-                estacao_id=estacaoID,
-                data_hora=item["data_hora"],
-                temperatura=item.get("temperatura"),
-                umidade=item.get("umidade"),
-                pressao=item.get("pressao"),
-                precipitacao=item.get("precipitacao"),
-                velocidade_vento=item.get("velocidade_vento"),
-                direcao_vento=item.get("direcao_vento"),
-                radiacao_solar=item.get("radiacao_solar"),
-                temperatura_agua=item.get("temperatura_agua"),
-                ph=item.get("ph"),
-                oxigenio_dissolvido=item.get("oxigenio_dissolvido"),
-                condutividade=item.get("condutividade"),
-                turbidez=item.get("turbidez"),
-                fonte=item.get("fonte"),
-            )
-            leituras_model_list.append(leitura_model)
-
-        LeituraRepository(database).create_many(leituras_model_list)
-    except ValidationError as error:
-        raise ValueError(
-            f"Dados inválidos na importação de Estações: {error}"
-        ) from error
-    except BaseException as error:
-        raise RuntimeError(f"Falha ao importar Estações: {error}") from error
+    return LeituraRepository(database).substituir_leituras(leituras, itens)
 
 
 def importar_dados() -> list[dict]:
@@ -165,5 +131,8 @@ def importar_dados() -> list[dict]:
 
 
 if __name__ == "__main__":
+    from src.logger import configurar_logs, logger
+
+    configurar_logs("coleta")
     dados = importar_dados()
-    print(f"Dados recebidos da API: {len(dados)} registros.")
+    logger.info(f"Dados recebidos da API: {len(dados)} registros.")

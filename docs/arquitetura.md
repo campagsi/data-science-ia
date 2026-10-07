@@ -1,202 +1,93 @@
-﻿# Arquitetura em camadas do projeto
+# Arquitetura em camadas do projeto
 
 ## Objetivo
 
-Documentar a organização da solução de monitoramento ambiental, com foco em separação de responsabilidades, modularização e fluxo de processamento dos dados.
+Documentar a organização da solução de monitoramento ambiental: separação de responsabilidades, módulos e fluxo de processamento dos dados.
 
-A arquitetura escolhida para o projeto é uma arquitetura em camadas, adequada ao fluxo de ingestão, validação, persistência e análise estatística. Ela organiza o sistema em módulos com papéis bem definidos, reduz acoplamento e facilita a evolução do código.
+A arquitetura é em camadas, adequada a um pipeline de ingestão, qualidade, persistência e análise. Cada módulo tem um papel definido, o que reduz o acoplamento e facilita testar e evoluir o código.
 
 ## Visão geral
 
-O sistema é composto por cinco principais camadas:
-
-1. Configuração e ambiente
+1. Configuração, segurança e observabilidade
 2. Modelo de domínio
 3. Serviços e regras de negócio
-4. Persistência e acesso a dados
+4. Persistência e Data Lake
 5. Orquestração e execução
-
-Esse modelo permite que as decisões de negócio e os dados fluam de forma ordenada, desde a coleta até a geração do relatório final.
-
-## 1. Camada de configuração
-
-Responsável por preparar o ambiente da aplicação e proteger dados sensíveis.
-
-### Funções
-
-- carregar variáveis de ambiente
-- acessar credenciais e endpoints
-- configurar conexão com o banco
-- determinar parâmetros do projeto
-
-### Componentes esperados
-
-- `.env`
-- `.env.example`
-- arquivos de configuração
-- leitura de parâmetros do ambiente
-
-### Exemplo de responsabilidade
-
-A aplicação não deve expor diretamente senhas, tokens ou URLs no código-fonte. Esse valor deve ser carregado via ambiente ou arquivo de configuração seguro.
-
-## 2. Camada de domínio
-
-Responsável por representar as entidades do problema em análise.
-
-### Entidades principais
-
-- `Cidade`
-- `Operador`
-- `Estacao`
-- `Leitura`
-
-### Responsabilidade
-
-Essa camada define:
-
-- atributos de cada entidade
-- relacionamentos entre entidades
-- regras básicas do domínio
-- estrutura dos dados que entram e saem do sistema
-
-### Exemplo
-
-Uma estação pertence a uma cidade e pode gerar várias leituras ao longo do tempo. A leitura contém valores como temperatura, pH, vazão, condutividade e oxigênio dissolvido.
-
-## 3. Camada de serviços
-
-Responsável pela lógica da aplicação e pela transformação dos dados entre as etapas do pipeline.
-
-### Funções principais
-
-- consumir dados da API REST configurada
-- converter o payload bruto para o modelo interno
-- validar estrutura, campos obrigatórios e intervalos
-- limpar e padronizar dados
-- remover ou anonimizar dados sensíveis
-- calcular métricas estatísticas
-- identificar outliers
-- gerar relatórios
-
-### Exemplos de serviços possíveis
-
-- `IngestionService`
-- `ValidationService`
-- `CleaningService`
-- `AnalyticsService`
-- `ReportingService`
-
-### Observação
-
-Essa camada é o coração do sistema, porque conecta a entrada bruta de dados com a saída útil para análise e tomada de decisão.
-
-### Normalização do payload
-
-O cliente de dados entrega o registro bruto com números e booleanos representados como texto. O serviço de normalização deve produzir um registro interno com:
-
-- `Decimal` ou `float` nos parâmetros ambientais e coordenadas;
-- `bool` em `operador_ativo` e `estacao_ativa`;
-- `datetime` em `data_hora`;
-- textos limpos nos códigos, nomes, tipos e `fonte`.
-
-A validação ocorre depois dessa conversão. Registros que não possam ser convertidos ou que violem os intervalos do contrato devem ser rejeitados e registrados. Medições ausentes não invalidam o registro e são gravadas como `NULL`.
-
-## 4. Camada de persistência
-
-Responsável por armazenar e consultar os dados no banco.
-
-### Funções
-
-- criar conexão com o banco
-- controlar a transação do lote (`DatabaseConnection.transaction()`)
-- criar tabelas
-- inserir registros
-- consultar dados por estação, cidade e período
-- executar filtros e agregações
-
-### Componentes esperados
-
-- `connection.py`
-- `schema.py` ou `criar_tabelas.py`
-- `repositories` para cada entidade
-
-### Repositórios sugeridos
-
-- `cidade_repository.py`
-- `estacao_repository.py`
-- `leitura_repository.py`
-- `operador_repository.py`
-
-Essa camada separa o acesso ao banco da lógica de negócio, o que é uma boa prática para manutenção e testes.
-
-Os repositórios recebem opcionalmente a `DatabaseConnection` que devem usar. Isso permite que `save_readings()` execute todos os inserts do lote na mesma transação, enquanto o uso isolado de um repositório continua abrindo sua própria conexão.
-
-## 5. Camada de orquestração
-
-Responsável por coordenar o fluxo completo do aplicativo.
-
-### Papel principal
-
-A classe principal da aplicação, geralmente `main.py`, orquestra a execução de todo o pipeline:
-
-1. carregar configurações
-2. consumir dados brutos
-3. normalizar, validar e limpar dados
-4. persistir no banco
-5. consultar e analisar os registros
-6. gerar resultados finais
-
-### Benefício
-
-Essa camada centraliza o funcionamento do sistema, deixando os módulos menores e mais focados.
-
-## Fluxo principal da arquitetura
 
 ```mermaid
 flowchart LR
-    A[Configuração e credenciais] --> B[Ingestão de dados]
-    B --> C[Validação e limpeza]
-    C --> D[Persistência]
-    D --> E[Consulta e análise]
-    E --> F[Relatório final]
+    A[Configuração, chaves e logs] --> B[Coleta]
+    B --> C[Normalização e anonimização]
+    C --> D[Parâmetros e validação]
+    D --> E[Banco relacional 3FN]
+    D --> L[Log de rejeitados]
+    E --> G[Análise e relatório]
 ```
 
-## Comunicação entre módulos
+## 1. Configuração, segurança e observabilidade
 
-A comunicação ocorre de forma ordenada e em nível de serviço:
+Prepara o ambiente e concentra o que é transversal a todas as etapas.
 
-- a camada de configuração fornece parâmetros para a aplicação
-- o módulo de ingestão coleta os dados
-- o módulo de validação verifica qualidade dos registros
-- o módulo de persistência salva os dados válidos
-- o módulo de análise extrai e calcula estatísticas
-- o módulo de relatório consolida o resultado
+| Módulo | Responsabilidade |
+|---|---|
+| `src/config.py` | Lê o `.env`: `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, também gravada em `Leituras.fonte`), `CHAVE_CRIPTOGRAFIA` e `CHAVE_HASH`. Falha com mensagem clara, sem expor valores. |
+| `src/security.py` | **Único** ponto de anonimização (SHA-256/HMAC de CPF e nome) e criptografia (Fernet do e-mail). |
+| `src/logger.py` | **Único** ponto de configuração de log: execução (console + arquivo) e rejeitados (só arquivo), no formato `data - [NÍVEL] - mensagem`. |
 
-A aplicação principal atua como coordenadora do pipeline.
+Nenhum segredo fica no código; o `.env.example` traz só os nomes. Regras em [seguranca-lgpd.md](seguranca-lgpd.md).
 
-## Visão de comunicação entre módulos
+## 2. Camada de domínio
 
-A arquitetura deve ser interpretada como um conjunto de módulos que se comunicam em etapas bem definidas:
+Modelos Pydantic em `src/models/`, um por tabela do modelo 3FN ([modelagem-banco.md](modelagem-banco.md)):
 
-- `Configuração` fornece parâmetros e credenciais
-- `Ingestão` coleta os dados brutos
-- `Validação` verifica a qualidade dos registros
-- `Persistência` salva os dados tratados
-- `Análise` consulta, calcula e interpreta os resultados
-- `Relatório` consolida a resposta final
+`EstadoModel`, `MunicipioModel`, `EstacaoModel`, `OperadorModel` (só dados anonimizados), `ParametroModel`, `LeituraModel` (cabeçalho) e `LeituraItemModel` (medição).
 
-Essa comunicação é em fluxo sequencial e orientada a pipeline, e não em uma interação de interface visual ou controller/web.
+Os tamanhos e as faixas dos campos seguem o DDL, então um valor que o banco recusaria é barrado antes da gravação.
+
+## 3. Camada de serviços
+
+| Serviço | Responsabilidade |
+|---|---|
+| `src/ingestion/data_client.py` | Coleta o lote em `GET {FONTE_DADOS}/api/v1/data-set`. Nova tentativa com espera crescente (1 s, 2 s, 4 s; 4 tentativas) para queda de conexão, timeout, HTTP 5xx e 429 (respeitando `Retry-After`), no máximo 30 requisições por minuto, resposta vazia tratada como lote vazio (`WARNING`) e falha definitiva como `FonteIndisponivelError` (`ERROR` e depois `CRITICAL`). |
+| `src/services/normalization_service.py` | Converte o payload para cabeçalho + itens, descobre os parâmetros pelos campos `*_tipo_codigo` e anonimiza o operador. O que não pode ser convertido vai para o log, sem parar o lote. |
+| `src/services/parametro_service.py` | Cadastra parâmetros novos sem faixa e rejeita os que não podem ser usados. |
+| `src/services/validation_service.py` | Valida antes de gravar e devolve **um resultado por registro** (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`). Não grava nem loga. |
+| `src/services/analytics_service.py` | Estatística por estação + parâmetro (média, mediana, desvio, variância, quartis, IQR) e anomalias por IQR ou Z-Score com indicador de alerta ([analise-estatistica.md](analise-estatistica.md)). |
+| `src/services/report_service.py` | Relatório estruturado, texto para o log/console e CSV. |
+| `src/cli/` | Consulta interativa (rich): município → estação → período → métricas e anomalias. |
+
+Os contratos de entrada e saída de cada serviço estão em [contrato-dados.md](contrato-dados.md).
+
+## 4. Persistência
+
+| Módulo | Responsabilidade |
+|---|---|
+| `src/database/connection.py` | Conexão, `transaction()` (uma conexão e um commit para o lote) e `insert_em_lotes()` (`INSERT` de várias linhas por comando). |
+| `src/repository/` | Um repositório por entidade: `EstadoRepository`, `MunicipioRepository`, `OperadorRepository`, `EstacaoRepository`, `ParametroRepository` e `LeituraRepository`. Gravação idempotente por `MERGE` e por substituição de partição (`substituir_leituras`). |
+| `src/ingestion/importar_dados.py` | Uma função por entidade, chamadas na ordem de dependência dentro da transação de `LeituraRepository.save_readings()`. |
+| `sql/` | O schema é criado e alterado **só** por SQL: `ddl_banco_relacional.sql`, `migrations/` e `dml_populacao.sql`. O Python não cria tabelas. |
+
+Os repositórios recebem a `DatabaseConnection` que devem usar. Assim, `save_readings()` executa todas as gravações do lote na mesma transação.
+
+## 5. Camada de orquestração
+
+`main.py` coordena o fluxo:
+
+- `iniciar_aplicacao()`: logs → configuração → segurança;
+- `run_pipeline()`: coleta → normalização → parâmetros → validação → log de rejeitados → gravação no banco → resumo (`python main.py --ingestao`). O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
+- `gerar_relatorio()`: análise estatística das medições gravadas, relatório em `INFO` e cada anomalia em `WARNING` (`python main.py --analise [--estacao] [--inicio] [--fim]`);
+- sem argumentos, `main.py` abre a CLI de consulta (`src/cli`).
+
+A sequência detalhada está em [diagramas/diagrama-sequencia.md](diagramas/diagrama-sequencia.md).
 
 ## Benefícios da arquitetura em camadas
 
-- separação clara das responsabilidades
-- organização mais simples do projeto
-- redução de acoplamento entre módulos
-- maior facilidade para testar funções isoladas
-- melhora na manutenção e evolução da aplicação
-- fácil expansão para novas fontes de dados e novas análises
+- separação clara das responsabilidades;
+- segurança e log centralizados num só lugar;
+- regras de qualidade testáveis sem banco (a validação recebe faixas e siglas prontas);
+- persistência idempotente isolada nos repositórios;
+- facilidade para incluir novas fontes, parâmetros e análises.
 
 ## Conclusão
 
-A arquitetura em camadas é a mais adequada para o projeto atual, porque ele funciona como um pipeline de dados ambientais, e não como um sistema de interface de usuário tradicional. Essa abordagem torna o fluxo de processamento mais claro, modular e fácil de evoluir.
+A arquitetura em camadas é a mais adequada ao projeto, porque ele funciona como um pipeline de dados ambientais, e não como um sistema de interface tradicional. Cada etapa tem entrada e saída definidas, o que torna o fluxo claro, auditável e fácil de evoluir.

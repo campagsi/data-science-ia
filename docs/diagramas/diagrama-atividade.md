@@ -1,44 +1,37 @@
 ```mermaid
 flowchart TD
-	inicio((Inicio)) --> configurar[Carregar configuracoes e credenciais]
-	configurar --> credenciais{Credenciais e configuracoes validas?}
+	inicio((Inicio)) --> configurar[Configurar logs, carregar configuracoes e chaves]
+	configurar --> credenciais{Configuracao e chaves validas?}
 
-	credenciais -- Nao --> erro_config[Registrar erro sem expor credenciais]
+	credenciais -- Nao --> erro_config[Registrar CRITICAL sem expor segredos]
 	erro_config --> fim_erro((Fim com erro))
-	credenciais -- Sim --> fonte[Consumir API REST]
+	credenciais -- Sim --> fonte[Consumir API REST em FONTE_DADOS]
 
-	fonte --> carga{Carga recebida com sucesso?}
+	fonte --> carga{Lista de objetos recebida?}
 	carga -- Nao --> registrar_falha[Registrar falha de ingestao]
 	registrar_falha --> fim_erro
-	carga -- Sim --> parse[Converter JSON em listas e dicionarios]
+	carga -- Sim --> normalizar[Normalizar: textos, numeros, datas, cabecalho + itens]
 
-	parse --> estrutura{Estrutura e tipos validos?}
-	estrutura -- Nao --> rejeitar[Rejeitar carga e registrar inconsistencias]
-	rejeitar --> fim_erro
-	 estrutura -- Sim --> normalizar[Converter numeros, booleanos e data/hora]
-	 normalizar --> limpar[Tratar campos ausentes ou nulos]
+	normalizar --> conversao{Valor convertivel?}
+	conversao -- Nao --> log_norm[Rejeitar item ou leitura e registrar no log]
+	log_norm --> anonimizar
+	conversao -- Sim --> anonimizar[Anonimizar CPF e nome, criptografar e-mail, descartar originais]
 
-	limpar --> dados_sensiveis{Existem dados sensiveis?}
-	dados_sensiveis -- Sim --> anonimizar[Anonimizar ou remover identificadores sensiveis]
-	dados_sensiveis -- Nao --> validar
-	anonimizar --> validar[Validar registros limpos]
+	anonimizar --> parametros[Sincronizar parametros: cadastrar novos sem faixa]
+	parametros --> validar[Validar cada registro: completude, acuracia, referencia, unicidade]
+	validar --> log_val[Registrar no log de rejeitados as leituras e medicoes recusadas]
 
-	validar --> registros{Existem registros validos?}
-	registros -- Nao --> fim_sem_dados((Fim sem dados para processar))
-	registros -- Sim --> persistir[Inserir estacoes e leituras no banco relacional]
+	log_val --> registros{Existem registros validos?}
+	registros -- Nao --> fim_sem_dados((Fim sem dados para gravar))
+	registros -- Sim --> persistir[Gravar em uma transacao: MERGE cadastros, substituir particoes estacao + dia]
 
-	persistir --> banco{Persistencia concluida?}
-	banco -- Nao --> erro_banco[Registrar erro de persistencia]
+	persistir --> banco{Commit concluido?}
+	banco -- Nao --> erro_banco[Rollback do lote e registrar erro]
 	erro_banco --> fim_erro
-	banco -- Sim --> consultar[Executar consultas SQL]
+	banco -- Sim --> resumo[Registrar resumo da ingestao]
 
-	consultar --> extrair[Extrair dados por estacao e periodo]
-	extrair --> estatistica[Calcular media, mediana e desvio padrao]
-	estatistica --> dispersao[Calcular intervalo interquartil - IQR]
-	dispersao --> outliers[Identificar outliers pela regra do IQR]
-	outliers --> resultado[Gerar resultado textual ou relatorio]
-
-	resultado --> testes[Executar testes unitarios e validacoes]
+	resumo --> analise[Analise estatistica: metricas e anomalias IQR ou Z-Score - python main.py --analise]
+	analise --> testes[Executar testes unitarios e validacoes]
 	testes --> testes_ok{Testes aprovados?}
 	testes_ok -- Nao --> corrigir[Corrigir codigo e repetir validacoes]
 	corrigir --> testes
@@ -59,46 +52,52 @@ flowchart TD
 	classDef processamento fill:#d9eaf7,stroke:#3d85c6,stroke-width:1px,color:#000;
 
 	class inicio,fim,fim_erro,fim_sem_dados inicioFim;
-	class credenciais,carga,estrutura,dados_sensiveis,registros,banco,testes_ok,revisar decisao;
-	class erro_config,registrar_falha,rejeitar,erro_banco erro;
-	 class configurar,fonte,parse,normalizar,limpar,anonimizar,validar,persistir,consultar,extrair,estatistica,dispersao,outliers,resultado,testes,corrigir,documentar,branch,commit,pull_request,corrigir_pr,entrega processamento;
+	class credenciais,carga,conversao,registros,banco,testes_ok,revisar decisao;
+	class erro_config,registrar_falha,log_norm,erro_banco erro;
+	class configurar,fonte,normalizar,anonimizar,parametros,validar,log_val,persistir,resumo,analise,testes,corrigir,documentar,branch,commit,pull_request,corrigir_pr,entrega processamento;
 ```
 
 ## Explicação de cada fase
 
 ### 1. Carregar configurações e credenciais
-Esta etapa prepara o sistema antes de qualquer operação. Ela pode incluir:
 
-- leitura de variáveis de ambiente;
-- carregamento de arquivos como `.env`, `.json` ou `.yaml`;
-- configuração da URL da API, banco de dados e parâmetros do projeto;
-- leitura de chaves, tokens e credenciais de autenticação;
-- validação se os dados essenciais foram preenchidos corretamente.
+Etapa inicial de segurança e preparação do ambiente (`iniciar_aplicacao()` em `main.py`):
 
-Em resumo, essa fase garante que o sistema saiba onde buscar os dados e como acessá-los de forma segura.
+- configura os logs (`src/logger.py`): arquivo da execução e arquivo de rejeitados em `logs/`;
+- lê as variáveis de ambiente do `.env`: `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` (URL da API, também gravada em `Leituras.fonte`), `CHAVE_CRIPTOGRAFIA` e `CHAVE_HASH`;
+- valida se as obrigatórias estão preenchidas e se a chave de criptografia é uma chave Fernet válida;
+- entrega as chaves ao `src/security.py`.
 
-### 2. Validação inicial
-O sistema verifica se as configurações e credenciais foram carregadas corretamente. Se houver falha, o processo encerra com erro para evitar uso indevido de credenciais ou acesso sem autorização.
+Se algo falhar, a aplicação registra a causa com nível `CRITICAL`, sem mostrar senhas nem chaves, e termina com código `1`.
 
-### 3. Limpeza e normalização dos dados
-Nesta fase os dados recebidos são tratados para remover ou corrigir:
+### 2. Coleta
 
-- campos vazios;
-- valores nulos;
-- inconsistências de formato;
-- dados incompletos.
+Busca o lote em `GET {FONTE_DADOS}/api/v1/data-set`. Se a resposta não for uma lista de objetos, a execução para.
+
+### 3. Normalização
+
+Limpa os textos, converte números e datas e separa cada registro em cabeçalho mais uma lista de medições, uma por parâmetro. Um valor que não pode ser convertido rejeita só aquela medição ou leitura e vai para o log de rejeitados; o resto do lote segue.
 
 ### 4. Tratamento de dados sensíveis
-Se houver dados pessoais ou sensíveis, eles são removidos ou anonimizados antes de seguir para o armazenamento.
 
-### 5. Persistência no banco
-Os dados válidos são salvos em banco para futura consulta e análise. Cidades, operadores, estações e leituras são gravados em uma única transação: se qualquer inserção falhar, nada do lote é gravado e o fluxo segue para o erro de persistência.
+CPF e nome viram hash SHA-256 (ou HMAC-SHA256 com a CHAVE_HASH) e o e-mail é criptografado (Fernet). Os valores originais não seguem para as próximas etapas. Regras em [seguranca-lgpd.md](../seguranca-lgpd.md).
 
-### 6. Análise estatística
-O sistema consulta os dados armazenados, calcula métricas e identifica padrões, como médias, desvios e valores atípicos.
+### 5. Parâmetros e validação
 
-### 7. Testes e validação
-Antes de concluir, o fluxo verifica se os resultados estão corretos. Caso falhe, o processo volta para correção e reexecução.
+Parâmetros novos são cadastrados sem faixa. A validação devolve um resultado por registro (`valido`, `campos_nulos`, `itens_invalidos`, `motivos`); tudo o que foi recusado vai para o log de rejeitados. Regras em [contrato-dados.md](../contrato-dados.md).
 
-### 8. Conclusão
-Quando tudo está validado, o processo chega ao fim com sucesso e os resultados ficam prontos para uso ou entrega.
+### 6. Persistência no banco
+
+Os registros válidos são gravados numa única transação: municípios, operadores e estações por `MERGE`, e leituras e medições substituindo as partições estação + dia, sem duplicar ao reexecutar. Se o commit falhar, nada do lote fica gravado. Depois do commit, o resumo da execução é registrado no log. O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
+
+### 7. Análise estatística
+
+Executada à parte (`python main.py --analise` ou pela CLI), sobre as medições gravadas. Calcula média, mediana, desvio padrão, variância e IQR por estação + parâmetro e sinaliza como anômala a medição fora do IQR ou com \|Z\| > 3, com o indicador de alerta de qualidade. Cada anomalia vai numa linha `WARNING` do log; nada é removido ([analise-estatistica.md](../analise-estatistica.md)).
+
+### 8. Testes e validação
+
+Antes de concluir, os testes automatizados (`python -m pytest tests`) verificam os resultados. Se falharem, o processo volta para correção.
+
+### 9. Conclusão
+
+Com tudo validado, a entrega segue por branch, commits e Pull Request.
