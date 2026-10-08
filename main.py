@@ -7,6 +7,7 @@ from src.cli.console_app import Console_APP
 from src.config import Settings, load_config
 from src.database.connection import DatabaseConnection
 from src.ingestion.data_client import DataClient
+from src.ingestion.extracao_dados import Extracao_Dados
 from src.logger import (
     configurar_logs,
     logger,
@@ -216,18 +217,20 @@ if __name__ == "__main__":
     argumentos = ler_argumentos(sys.argv[1:])
     try:
         settings = iniciar_aplicacao(etapa_da_execucao(argumentos))
-        if argumentos.ingestao:
-            run_pipeline()
-        elif argumentos.analise:
-            gerar_relatorio(
-                DatabaseConnection(settings.azure_sql_connectionstring),
-                argumentos.estacao,
-                argumentos.inicio,
-                argumentos.fim,
-            )
-        else:
-            console_app = Console_APP()
-            console_app.run()
+        Extracao_Dados().execute()
+
+        # if argumentos.ingestao:
+        #     run_pipeline()
+        # elif argumentos.analise:
+        #     gerar_relatorio(
+        #         DatabaseConnection(settings.azure_sql_connectionstring),
+        #         argumentos.estacao,
+        #         argumentos.inicio,
+        #         argumentos.fim,
+        #     )
+        # else:
+        #     console_app = Console_APP()
+        #     console_app.run()
     except Exception as erro:
         logger.critical(f"{type(erro).__name__}: {erro}")
         raise SystemExit(1) from erro
