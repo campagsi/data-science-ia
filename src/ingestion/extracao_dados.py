@@ -1,19 +1,12 @@
-import logging
 import os
 from datetime import datetime
 
 import pandas as pd
 import requests
-from rich.console import Console
 
 from src.logger import logger
 from src.services.normalization_service import NormalizationService
 from src.services.validation_service import ValidationService
-
-# ====================================
-# CONFIGURAÇÃO DE LOGGING ESTRUTURADO
-# ====================================
-
 
 api_result = requests.get("http://127.0.0.1:8000/api/v1/data-set")
 
@@ -53,32 +46,29 @@ class Extracao_Dados:
         data_ingestao = datetime.now()
 
         for item in dados_validados:
-            registro = item.get("registro") or {}
-            registros_validos.append(registro)
+            registro = item["registro"]
 
-            for item_invalido in item.get("itens_invalidos", []):
-                log_ingestao.append(
-                    {
-                        "registro_codigo": registro.get("registro_codigo"),
-                        "estacao_codigo": registro.get("estacao_codigo", ""),
-                        "estacao_nome": registro.get("estacao_nome"),
-                        "data_ingestao": data_ingestao,
-                        **item_invalido,
-                    }
-                )
+            if item["valido"]:
+                registro["fonte"] = registro["estacao_nome"]
+                registro["data_ingestao"] = data_ingestao
+                registros_validos.append(registro)
 
-        nome_da_fonte_dados = ""
-
-        if nome_da_fonte_dados != registros_validos[0]["estacao_nome"]:
-            nome_da_fonte_dados = registros_validos[0]["estacao_nome"]
+                for item_invalido in item.get("itens_invalidos", []):
+                    log_ingestao.append(
+                        {
+                            "registro_codigo": registro.get("registro_codigo"),
+                            "estacao_codigo": registro.get("estacao_codigo", ""),
+                            "estacao_nome": registro.get("estacao_nome"),
+                            "data_ingestao": data_ingestao,
+                            **item_invalido,
+                        }
+                    )
+            else:
+                log_ingestao.append(registro)
 
         # DF que recebe todos os dados após a validação
         df_bruto = pd.DataFrame(registros_validos)  # Receberá os dados dados_validados
-        df_bruto["data_ingestao"] = datetime.now()
-        df_bruto["nome_fonte"] = nome_da_fonte_dados
-
-        # ==== Atenção ======
-        # df_bruto["is_valid"] = True  # Acrescentado para testes deve ser removido
+        df_bruto["data_ingestao"] = data_ingestao
 
         logger.info("Realizando separação de dados válidos e inválidos...")
         # Separa os dados Aprovados dos Rejeitados em DFs distintos
