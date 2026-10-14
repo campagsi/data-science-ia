@@ -1,5 +1,9 @@
 from typing import Any
 
+from pydantic import ValidationError
+
+from src.models.data_contract import DataContract
+
 Faixa = tuple[float | None, float | None]
 
 
@@ -57,17 +61,25 @@ class ValidationService:
 
         resultados = []
         for registro in normalizados:
-            campos_nulos = [campo for campo in self.CAMPOS_VITAIS if registro.get(campo) is None]
+            campos_nulos = [
+                campo for campo in self.CAMPOS_VITAIS if registro.get(campo) is None
+            ]
             motivos = []
             if campos_nulos:
                 motivos.append(
-                    self.__motivo("completude", ",".join(campos_nulos), "campo vital nulo")
+                    self.__motivo(
+                        "completude", ",".join(campos_nulos), "campo vital nulo"
+                    )
                 )
 
             motivos += self.__validar_cabecalho(registro)
-            motivos += self.__validar_unicidade(registro, registros_vistos, estacoes, operadores)
+            motivos += self.__validar_unicidade(
+                registro, registros_vistos, estacoes, operadores
+            )
 
-            itens_validos, itens_invalidos = self.__validar_itens(registro.get("itens", []))
+            itens_validos, itens_invalidos = self.__validar_itens(
+                registro.get("itens", [])
+            )
             if not itens_validos:
                 motivos.append(
                     self.__motivo("completude", "itens", "leitura sem medições válidas")
@@ -85,10 +97,35 @@ class ValidationService:
             )
         return resultados
 
+    def validar_contrato(self, dados: list[dict]) -> list[dict]:
+        dados_validos = []
+        log = []
+
+        for registro in dados:
+            try:
+                registro_model = DataContract.model_validate(registro)
+                dados_validos.append(registro_model)
+            except ValidationError as erro:
+                for item in erro.errors():
+                    key = ".".join(map(str, item["loc"]))
+                    log.append(
+                        {
+                            "registro_codigo": registro.get("registro_codigo"),
+                            "campo": key,
+                            "tipo": item["type"],
+                            "mensagem": item["msg"],
+                            "valor_recebido": registro.get(key),
+                        }
+                    )
+
+        return dados_validos, log
+
     @staticmethod
     def registros_validos(resultados: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Registros que podem ser gravados nas entidades e na Silver."""
-        return [resultado["registro"] for resultado in resultados if resultado["valido"]]
+        return [
+            resultado["registro"] for resultado in resultados if resultado["valido"]
+        ]
 
     def __validar_cabecalho(self, registro: dict[str, Any]) -> list[dict[str, Any]]:
         motivos = []
@@ -97,18 +134,29 @@ class ValidationService:
             valor = registro.get(campo)
             if valor is not None and not minimo <= valor <= maximo:
                 motivos.append(
-                    self.__motivo("acuracia", campo, f"fora da faixa {minimo} a {maximo}", valor)
+                    self.__motivo(
+                        "acuracia", campo, f"fora da faixa {minimo} a {maximo}", valor
+                    )
                 )
 
         sigla = registro.get("cidade_estado")
         if sigla is not None:
             if len(sigla) != 2 or not sigla.isalpha():
                 motivos.append(
-                    self.__motivo("validade", "cidade_estado", "sigla deve ter duas letras", sigla)
+                    self.__motivo(
+                        "validade", "cidade_estado", "sigla deve ter duas letras", sigla
+                    )
                 )
-            elif self.__siglas_estados is not None and sigla not in self.__siglas_estados:
+            elif (
+                self.__siglas_estados is not None and sigla not in self.__siglas_estados
+            ):
                 motivos.append(
-                    self.__motivo("referencia", "cidade_estado", "estado não cadastrado em Estados", sigla)
+                    self.__motivo(
+                        "referencia",
+                        "cidade_estado",
+                        "estado não cadastrado em Estados",
+                        sigla,
+                    )
                 )
         return motivos
 
@@ -126,14 +174,22 @@ class ValidationService:
             if codigo in registros_vistos:
                 # Retransmissão da API: mantém a primeira ocorrência.
                 motivos.append(
-                    self.__motivo("unicidade", "registro_codigo", "registro repetido no lote (retransmissão)")
+                    self.__motivo(
+                        "unicidade",
+                        "registro_codigo",
+                        "registro repetido no lote (retransmissão)",
+                    )
                 )
             registros_vistos.add(codigo)
 
         # O mesmo código não pode chegar com dados cadastrais diferentes no lote.
         # O e-mail criptografado fica de fora: o token muda a cada criptografia.
         conferencias = (
-            ("estacao_codigo", estacoes, ("estacao_nome", "estacao_latitude", "estacao_longitude", "municipio")),
+            (
+                "estacao_codigo",
+                estacoes,
+                ("estacao_nome", "estacao_latitude", "estacao_longitude", "municipio"),
+            ),
             ("operador_codigo", operadores, ("cpf_hash", "nome_hash", "municipio")),
         )
         for campo_codigo, vistos, campos_identidade in conferencias:
@@ -144,8 +200,10 @@ class ValidationService:
             if vistos.setdefault(codigo_cadastro, identidade) != identidade:
                 motivos.append(
                     self.__motivo(
-                        "unicidade", campo_codigo,
-                        "código repetido no lote com dados cadastrais diferentes", codigo_cadastro,
+                        "unicidade",
+                        campo_codigo,
+                        "código repetido no lote com dados cadastrais diferentes",
+                        codigo_cadastro,
                     )
                 )
         return motivos
@@ -159,23 +217,31 @@ class ValidationService:
             ):
                 invalidos.append(
                     self.__motivo(
-                        "parametro", item["campo"],
-                        "parâmetro não cadastrado (ver log do parâmetro)", item["codigo_parametro"],
+                        "parametro",
+                        item["campo"],
+                        "parâmetro não cadastrado (ver log do parâmetro)",
+                        item["codigo_parametro"],
                     )
                 )
                 continue
 
             valor = item.get("valor")
             if valor is None:
-                invalidos.append(self.__motivo("completude", item["campo"], "medição nula"))
+                invalidos.append(
+                    self.__motivo("completude", item["campo"], "medição nula")
+                )
                 continue
 
             minimo, maximo = self.__faixas.get(item["codigo_parametro"], (None, None))
-            if (minimo is not None and valor < minimo) or (maximo is not None and valor > maximo):
+            if (minimo is not None and valor < minimo) or (
+                maximo is not None and valor > maximo
+            ):
                 invalidos.append(
                     self.__motivo(
-                        "acuracia", item["campo"],
-                        f"fora da faixa {self.__limite(minimo)} a {self.__limite(maximo)}", valor,
+                        "acuracia",
+                        item["campo"],
+                        f"fora da faixa {self.__limite(minimo)} a {self.__limite(maximo)}",
+                        valor,
                     )
                 )
                 continue
@@ -190,5 +256,7 @@ class ValidationService:
         return f"{valor:g}"
 
     @staticmethod
-    def __motivo(etapa: str, campo: str, motivo: str, valor: Any = None) -> dict[str, Any]:
+    def __motivo(
+        etapa: str, campo: str, motivo: str, valor: Any = None
+    ) -> dict[str, Any]:
         return {"etapa": etapa, "campo": campo, "motivo": motivo, "valor": valor}

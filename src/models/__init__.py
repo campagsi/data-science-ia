@@ -1,3 +1,4 @@
+from .data_contract import DataContract
 from .estacao_model import EstacaoModel
 from .estado_model import EstadoModel
 from .leitura_item_model import LeituraItemModel
