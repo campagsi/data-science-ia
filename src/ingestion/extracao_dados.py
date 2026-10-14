@@ -18,6 +18,7 @@ class Extracao_Dados:
         self.diretorio_bronze = os.path.join(diretorio_base, "bronze")
         self.diretorio_silver = os.path.join(diretorio_base, "silver")
         self.diretorio_gold = os.path.join(diretorio_base, "gold")
+        self._inicializar_diretorios()
         self.validation_service = ValidationService()
         self.normalization_service = NormalizationService()
 
@@ -81,6 +82,82 @@ class Extracao_Dados:
         logger.info(f"Total de dados inválidos: {len(df_bruto_invalidos)}")
         logger.info(f"Arquivos salvos em: {self.diretorio_bronze}")
 
+    def extrair_dados_silver(self, nome_arquivo_bronze):
+        logger.info("==== [Silver] ====")
+        arquivo_bronze = os.path.join(self.diretorio_bronze, nome_arquivo_bronze)
+
+        logger.info(
+            f"[Silver] Validando a existencia do arquivo {nome_arquivo_bronze}..."
+        )
+        if not os.path.exists(arquivo_bronze):
+            raise FileNotFoundError(
+                f"Arquivo {nome_arquivo_bronze}.json não encontrado no Data Lake Bronze."
+            )
+
+        logger.info(
+            f"[Silver] Validando a extenção do arquivo {nome_arquivo_bronze}..."
+        )
+        extensao_arquivo = os.path.splitext(nome_arquivo_bronze)[1].lower()
+
+        if extensao_arquivo != ".json":
+            raise ValueError(
+                f'Formato de arquivo não suportado: {extensao_arquivo}. Utlize arquivo ".json"!'
+            )
+
+        logger.info(f"[Silver] Realizando leitura do arquivo {nome_arquivo_bronze}...")
+        dados_bronze = pd.read_json(arquivo_bronze)
+
+        logger.info("[Silver] Eliminando registros duplicados...")
+        registros_bronze = dados_bronze.drop_duplicates(
+            subset=["registro_codigo"], keep="last"
+        ).to_dict(orient="records")
+
+        logger.info("[Silver] Normalizando registros...")
+        registros_normalizados = self.normalization_service.normalize(registros_bronze)
+
+        logger.info("[Silver] Realizando Validação...")
+        registros_validados = self.validation_service.validate_data(
+            registros_normalizados
+        )
+
+        log = []
+        registros_silver = []
+
+        for i in registros_validados:
+            registros_silver.append(i["registro"])
+
+            if not i["valido"] or any(
+                [i["campos_nulos"], i["itens_invalidos"], i["motivos"]]
+            ):
+                if i["valido"]:
+                    log.append(
+                        {
+                            "tipo_rejeição": "campo",
+                            "itens_invalidos": i["itens_invalidos"],
+                            "motivo": i["motivos"],
+                        }
+                    )
+                else:
+                    log.append(
+                        {
+                            "tipo_rejeição": "total",
+                            "campos_nulos": i["campos_nulos"],
+                            "motivo": i["motivos"],
+                        }
+                    )
+
+        df_silver = pd.DataFrame(registros_silver)
+        nome_saida = f"silver_{os.path.splitext(nome_arquivo_bronze)[0]}.parquet"
+        arquivo_silver = os.path.join(self.diretorio_silver, nome_saida)
+        logger.info("[SILVER] Salvando arquivo...")
+        df_silver.to_parquet(
+            arquivo_silver, engine="pyarrow", index=False, compression="snappy"
+        )
+
+        if log:
+            logger.warning("Alguns campos/registros não foram salvos, verifique o log")
+
     def execute(self):
         result = api_result.json()
         self.extrair_dados_bronze(result)
+        self.extrair_dados_silver("dados_bronze.json")
