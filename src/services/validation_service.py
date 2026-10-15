@@ -111,10 +111,15 @@ class ValidationService:
                     log.append(
                         {
                             "registro_codigo": registro.get("registro_codigo"),
-                            "campo": key,
-                            "tipo": item["type"],
-                            "mensagem": item["msg"],
-                            "valor_recebido": registro.get(key),
+                            "valido": False,
+                            "motivos": [
+                                {
+                                    "etapa": "Validação do Contrato",
+                                    "campo": key,
+                                    "motivo": item["msg"],
+                                    "valor": registro.get(key),
+                                }
+                            ],
                         }
                     )
 

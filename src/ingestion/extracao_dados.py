@@ -1,28 +1,34 @@
+import json
 import os
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 import requests
 from pydantic import BaseModel
 
-from src.logger import logger
+from src.logger import logger, registrar_resultados_validacao
+from src.repository.estado_repository import EstadoRepository
+from src.repository.parametro_repository import ParametroRepository
 from src.services.normalization_service import NormalizationService
+from src.services.parametro_service import ParametroService
 from src.services.validation_service import ValidationService
 
 api_result = requests.get("http://127.0.0.1:8000/api/v1/data-set")
 
 
 class Extracao_Dados:
-    def __init__(self, diretorio_base="data_lake"):
+    def __init__(self, fonte_dados: str, diretorio_base="data_lake"):
         self.diretorio_base = diretorio_base
         self.diretorio_bronze = os.path.join(diretorio_base, "bronze")
         self.diretorio_silver = os.path.join(diretorio_base, "silver")
         self.diretorio_gold = os.path.join(diretorio_base, "gold")
+        self.fonte_dados = fonte_dados
         self._inicializar_diretorios()
-        self.validation_service = ValidationService()
         self.normalization_service = NormalizationService()
 
     def _inicializar_diretorios(self):
+
         os.makedirs(self.diretorio_bronze, exist_ok=True)
         os.makedirs(self.diretorio_silver, exist_ok=True)
         os.makedirs(self.diretorio_gold, exist_ok=True)
@@ -35,7 +41,7 @@ class Extracao_Dados:
         logger.info("[Bronze] Realizando a ingestdão de dados para a camada Bronze...")
 
         logger.info("[Bronze] Realizando validação dos dados...")
-        dados_validados, log_erros = self.validation_service.validar_contrato(dados)
+        dados_validados, log_erros = ValidationService().validar_contrato(dados)
 
         registros_validos = []
 
@@ -43,7 +49,7 @@ class Extracao_Dados:
             registro = item.model_dump(mode="json")
             registros_validos.append(
                 {
-                    "fonte": item.estacao_nome,
+                    "fonte": self.fonte_dados,
                     "data_ingestao": datetime.now(),
                     **registro,
                 }
@@ -51,7 +57,6 @@ class Extracao_Dados:
 
         logger.info("Criando DF...")
         df_bruto_validos = pd.DataFrame(registros_validos)
-        df_bruto_invalidos = pd.DataFrame(log_erros)
 
         if not df_bruto_validos.empty:
             arquivo_saida = os.path.join(self.diretorio_bronze, "dados_bronze.json")
@@ -65,24 +70,15 @@ class Extracao_Dados:
                 date_format="iso",
             )
 
-        if not df_bruto_invalidos.empty:
-            logger.warning("Dados inválidos encontrados...")
-            arquivo_saida = os.path.join(self.diretorio_bronze, "log_dados_bronze.csv")
-            logger.info("Salvando arquivo de log...")
-            df_bruto_invalidos.to_csv(
-                arquivo_saida,
-                index=False,
-                sep=";",
-                encoding="utf-8-sig",
-                decimal=",",
-                date_format="iso",
-            )
+        if len(log_erros) > 0:
+            logger.warning("Registros que não atendem o contrato encontrados...")
 
         logger.info(f"Total de dados válidos: {len(df_bruto_validos)}")
-        logger.info(f"Total de dados inválidos: {len(df_bruto_invalidos)}")
-        logger.info(f"Arquivos salvos em: {self.diretorio_bronze}")
+        logger.info(f"Total de Registros inválidos: {len(log_erros)}")
+        logger.info(f"Data lake salvo em: {self.diretorio_bronze}")
+        return log_erros
 
-    def extrair_dados_silver(self, nome_arquivo_bronze):
+    def extrair_dados_silver(self, nome_arquivo_bronze) -> list[dict[str, Any]]:
         logger.info("==== [Silver] ====")
         arquivo_bronze = os.path.join(self.diretorio_bronze, nome_arquivo_bronze)
 
@@ -115,47 +111,43 @@ class Extracao_Dados:
         logger.info("[Silver] Normalizando registros...")
         registros_normalizados = self.normalization_service.normalize(registros_bronze)
 
-        logger.info("[Silver] Realizando Validação...")
-        registros_validados = self.validation_service.validate_data(
-            registros_normalizados
+        parametros = ParametroService(ParametroRepository()).sincronizar(
+            NormalizationService.descobrir_parametros(registros_normalizados)
         )
+        siglas = {estado.sigla for estado in EstadoRepository().get_all()}
 
-        log = []
+        logger.info("[Silver] Realizando Validação...")
+        registros_validados = ValidationService(
+            faixas=ParametroService.faixas(parametros),
+            siglas_estados=siglas,
+            parametros_validos=set(parametros),
+        ).validate_data(registros_normalizados)
+
         registros_silver = []
 
         for i in registros_validados:
-            registros_silver.append(i["registro"])
+            registros_silver.append(
+                {
+                    "fonte": self.fonte_dados,
+                    "data_ingestao": datetime.now(),
+                    **i["registro"],
+                }
+            )
 
-            if not i["valido"] or any(
-                [i["campos_nulos"], i["itens_invalidos"], i["motivos"]]
-            ):
-                if i["valido"]:
-                    log.append(
-                        {
-                            "tipo_rejeição": "campo",
-                            "itens_invalidos": i["itens_invalidos"],
-                            "motivo": i["motivos"],
-                        }
-                    )
-                else:
-                    log.append(
-                        {
-                            "tipo_rejeição": "total",
-                            "campos_nulos": i["campos_nulos"],
-                            "motivo": i["motivos"],
-                        }
-                    )
-
+        logger.info("[Silver] Realizando a Criação do DF...")
         df_silver = pd.DataFrame(registros_silver)
+        df_silver["itens"] = df_silver["itens"].apply(
+            lambda x: json.dumps(x, ensure_ascii=False, default=str)
+        )
         nome_saida = f"silver_{os.path.splitext(nome_arquivo_bronze)[0]}.parquet"
         arquivo_silver = os.path.join(self.diretorio_silver, nome_saida)
-        logger.info("[SILVER] Salvando arquivo...")
+
+        logger.info("[Silver] Salvando arquivo...")
         df_silver.to_parquet(
             arquivo_silver, engine="pyarrow", index=False, compression="snappy"
         )
 
-        if log:
-            logger.warning("Alguns campos/registros não foram salvos, verifique o log")
+        return registros_validados, parametros
 
     def execute(self):
         result = api_result.json()
