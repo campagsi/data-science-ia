@@ -227,20 +227,22 @@ def etapa_da_execucao(argumentos: argparse.Namespace) -> str:
 
 if __name__ == "__main__":
     argumentos = ler_argumentos(sys.argv[1:])
+    Extracao_Dados("test").execute()
     try:
-        settings = iniciar_aplicacao(etapa_da_execucao(argumentos))
-        if argumentos.ingestao:
-            run_pipeline()
-        elif argumentos.analise:
-            gerar_relatorio(
-                DatabaseConnection(settings.azure_sql_connectionstring),
-                argumentos.estacao,
-                argumentos.inicio,
-                argumentos.fim,
-            )
-        else:
-            console_app = Console_APP()
-            console_app.run()
+        pass
+        # settings = iniciar_aplicacao(etapa_da_execucao(argumentos))
+        # if argumentos.ingestao:
+        #     run_pipeline()
+        # elif argumentos.analise:
+        #     gerar_relatorio(
+        #         DatabaseConnection(settings.azure_sql_connectionstring),
+        #         argumentos.estacao,
+        #         argumentos.inicio,
+        #         argumentos.fim,
+        #     )
+        # else:
+        #     console_app = Console_APP()
+        #     console_app.run()
     except Exception as erro:
         logger.critical(f"{type(erro).__name__}: {erro}")
         raise SystemExit(1) from erro

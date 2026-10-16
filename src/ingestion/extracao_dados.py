@@ -126,13 +126,14 @@ class Extracao_Dados:
         registros_silver = []
 
         for i in registros_validados:
-            registros_silver.append(
-                {
-                    "fonte": self.fonte_dados,
-                    "data_ingestao": datetime.now(),
-                    **i["registro"],
-                }
-            )
+            if i["valido"]:
+                registros_silver.append(
+                    {
+                        "fonte": self.fonte_dados,
+                        "data_ingestao": datetime.now(),
+                        **i["registro"],
+                    }
+                )
 
         logger.info("[Silver] Realizando a Criação do DF...")
         df_silver = pd.DataFrame(registros_silver)
@@ -149,7 +150,141 @@ class Extracao_Dados:
 
         return registros_validados, parametros
 
+    def extrair_dados_gold(
+        self, nome_arquivo_silver: str = "silver_dados_bronze.parquet"
+    ):
+        logger.info("==== [Gold] ====")
+        arquivo_bronze = os.path.join(
+            self.diretorio_silver,
+        )
+
+        logger.info(
+            f"[Silver] Validando a existencia do arquivo {nome_arquivo_silver}..."
+        )
+        if not os.path.exists(arquivo_bronze):
+            raise FileNotFoundError(
+                f"Arquivo {nome_arquivo_silver}.json não encontrado no Data Lake Silver."
+            )
+
+        logger.info(
+            f"[Silver] Validando a extenção do arquivo {nome_arquivo_silver}..."
+        )
+        extensao_arquivo = os.path.splitext(nome_arquivo_silver)[1].lower()
+
+        if extensao_arquivo != ".parquet":
+            raise ValueError(
+                f'Formato de arquivo não suportado: {extensao_arquivo}. Utlize arquivo ".parquet"!'
+            )
+
+        logger.info(f"[Silver] Realizando leitura do arquivo {nome_arquivo_silver}...")
+        dados_silver = pd.read_parquet(arquivo_bronze)
+        # df_dim_estacoes = self._criar_df_dim_estacoes(dados_silver)
+        # df_dim_tempo = self.criar_df_dim_tempo(dados_silver)
+        self._criar_df_dim_parametro(dados_silver)
+
+        # df_dim_estacoes.to_parquet(
+        #     os.path.join(self.diretorio_gold, "estacoes.parquet"),
+        #     engine="pyarrow",
+        #     index=False,
+        #     compression="snappy",
+        # )
+
+        # Criação do DF de Estações
+
+        # pd.DataFrame([dados_silver.cidade_estado, dados_silver.estacao_codigo])
+        # print(df_dim_estacoes)
+
+    def _criar_df_dim_estacoes(self, dados_silver: pd.DataFrame):
+        estacoes = (
+            dados_silver[
+                [
+                    "estacao_codigo",
+                    "estacao_nome",
+                    "cidade_estado",
+                    "municipio",
+                    "estacao_latitude",
+                    "estacao_longitude",
+                ]
+            ]
+            .drop_duplicates(subset="estacao_codigo")
+            .reset_index(drop=True)
+        )
+        estacoes.insert(0, "estacao_sk", range(1, len(estacoes) + 1))
+        return estacoes
+
+    def criar_df_dim_tempo(self, arquivo_silver: pd.DataFrame):
+        itens = pd.to_datetime(arquivo_silver["data_hora_ciclo"]).dt.date
+        dim_tempo = pd.DataFrame(
+            {"data": pd.date_range(start=itens.min(), end=itens.max(), freq="D")}
+        )
+
+        dim_tempo.insert(
+            0, "tempo_sk", dim_tempo["data"].dt.strftime("%Y%m%d").astype(int)
+        )
+        dim_tempo["ano"] = dim_tempo["data"].dt.year
+        dim_tempo["mes"] = dim_tempo["data"].dt.month
+        dim_tempo["dia"] = dim_tempo["data"].dt.day
+        dim_tempo["trimestre"] = dim_tempo["data"].dt.quarter
+        dim_tempo["dia_semana"] = dim_tempo["data"].dt.day_of_week
+        dim_tempo["dia_util"] = dim_tempo["dia_semana"] < 5
+
+        return dim_tempo
+
+        # datas = pd.to_dateti  me(
+        #     itens.apply(
+        #         lambda item: (
+        #             item["data_hora_leitura"] if isinstance(item, dict) else None
+        #         )
+        #     ),
+        #     errors="coerce",
+        # ).dropna()
+        print(dim_tempo)
+
+        # dim_tempo = pd.DataFrame({"data_completa": pd.date_range(start=datas.min())})
+
+    def _criar_df_dim_parametro(self, dados_silver: pd.DataFrame):
+        itens = self._tratar_leitura_itens(dados_silver)
+        df_dim_parametro = pd.DataFrame(itens)
+        df_dim_parametro.drop(columns=["data_hora_leitura", "valor"], inplace=True)
+
+        df_dim_parametro.to_parquet(
+            os.path.join(self.diretorio_gold, "as.parquet"),
+            engine="pyarrow",
+            index=False,
+            compression="snappy",
+        )
+
+    def _criar_df_fato_medicoes(self):
+        pass
+
+    def _tratar_leitura_itens(self, dt_silver: pd.DataFrame):
+        # Converter  string JSON em dicionário
+        lista_dic_itens = dt_silver["itens"].apply(json.loads)
+
+        itens = lista_dic_itens.explode(ignore_index=True)
+
+        norm_parmetro = (
+            pd.json_normalize(itens.tolist())
+            .drop_duplicates(subset=["codigo_parametro"], keep="last")
+            .to_dict(orient="records")
+        )
+
+        return norm_parmetro
+
+    # print(type(i.iloc[0]))
+    # df_itens = pd.json_normalize(itens.explode(ignore_index=True).tolist())
+    # itens_limpo = df_itens.drop_duplicates(
+    #     subset=["codigo_parametro"], keep="last"
+    # ).to_dict(orient="records")
+
+    # df_dim_itens = pd.DataFrame(itens_limpo)
+    # # df_re = pd.concat([df_itens.drop(col)])
+    # print(df_itens)
+    # arquivo_saida =
+
     def execute(self):
-        result = api_result.json()
-        self.extrair_dados_bronze(result)
-        self.extrair_dados_silver("dados_bronze.json")
+        self.extrair_dados_gold()
+
+    #     result = api_result.json()
+    #     self.extrair_dados_bronze(result)
+    #     self.extrair_dados_silver("dados_bronze.json")
