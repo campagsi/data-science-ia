@@ -15,13 +15,9 @@ from src.logger import (
     registrar_resultados_validacao,
     registrar_resumo,
 )
-from src.repository.estado_repository import EstadoRepository
 from src.repository.leitura_repository import LeituraRepository
-from src.repository.parametro_repository import ParametroRepository
 from src.security import configurar_seguranca
 from src.services.analytics_service import AnaliticsService
-from src.services.normalization_service import NormalizationService
-from src.services.parametro_service import ParametroService
 from src.services.report_service import ReportService
 from src.services.validation_service import ValidationService
 
@@ -74,6 +70,9 @@ def run_pipeline() -> dict[str, int]:
     normalized_data_silver, parametros = extracao_dados.extrair_dados_silver(
         "dados_bronze.json"
     )
+
+    # Realiza a extração de dados para a camada gold a partir dos dados extraidos pela camada silver
+    extracao_dados.extrair_dados_gold("dados_silver.parquet")
 
     # O schema é mantido por sql/ddl_banco_relacional.sql e sql/migrations/.
     database = DatabaseConnection(settings.azure_sql_connectionstring)
@@ -227,22 +226,21 @@ def etapa_da_execucao(argumentos: argparse.Namespace) -> str:
 
 if __name__ == "__main__":
     argumentos = ler_argumentos(sys.argv[1:])
-    Extracao_Dados("test").execute()
+    # Extracao_Dados("test").execute()
     try:
-        pass
-        # settings = iniciar_aplicacao(etapa_da_execucao(argumentos))
-        # if argumentos.ingestao:
-        #     run_pipeline()
-        # elif argumentos.analise:
-        #     gerar_relatorio(
-        #         DatabaseConnection(settings.azure_sql_connectionstring),
-        #         argumentos.estacao,
-        #         argumentos.inicio,
-        #         argumentos.fim,
-        #     )
-        # else:
-        #     console_app = Console_APP()
-        #     console_app.run()
+        settings = iniciar_aplicacao(etapa_da_execucao(argumentos))
+        if argumentos.ingestao:
+            run_pipeline()
+        elif argumentos.analise:
+            gerar_relatorio(
+                DatabaseConnection(settings.azure_sql_connectionstring),
+                argumentos.estacao,
+                argumentos.inicio,
+                argumentos.fim,
+            )
+        else:
+            console_app = Console_APP()
+            console_app.run()
     except Exception as erro:
         logger.critical(f"{type(erro).__name__}: {erro}")
         raise SystemExit(1) from erro

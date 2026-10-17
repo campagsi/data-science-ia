@@ -1,13 +1,14 @@
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import requests
-from pydantic import BaseModel
 
-from src.logger import logger, registrar_resultados_validacao
+from src.logger import logger
 from src.repository.estado_repository import EstadoRepository
 from src.repository.parametro_repository import ParametroRepository
 from src.services.normalization_service import NormalizationService
@@ -140,7 +141,7 @@ class Extracao_Dados:
         df_silver["itens"] = df_silver["itens"].apply(
             lambda x: json.dumps(x, ensure_ascii=False, default=str)
         )
-        nome_saida = f"silver_{os.path.splitext(nome_arquivo_bronze)[0]}.parquet"
+        nome_saida = "dados_silver.parquet"
         arquivo_silver = os.path.join(self.diretorio_silver, nome_saida)
 
         logger.info("[Silver] Salvando arquivo...")
@@ -153,109 +154,322 @@ class Extracao_Dados:
     def extrair_dados_gold(
         self, nome_arquivo_silver: str = "silver_dados_bronze.parquet"
     ):
-        logger.info("==== [Gold] ====")
-        arquivo_bronze = os.path.join(
-            self.diretorio_silver,
+        logger.info("==== [Gold] Iniciando processamento ====")
+
+        origem = Path(self.diretorio_silver) / nome_arquivo_silver
+        destino = Path(self.diretorio_gold)
+
+        logger.info("==== [Gold] Validando arquivo de entrada ====")
+        if origem.suffix.lower() != ".parquet":
+            raise ValueError("O arquivo Silver deve ser .parquet")
+
+        if not origem.is_file():
+            raise FileNotFoundError(f"Arquivo não encontrado: {origem}")
+
+        logger.info("==== [Gold] Criando diretório de saída ====")
+        destino.mkdir(parents=True, exist_ok=True)
+
+        logger.info("==== [Gold] Processando dados ====")
+        # Carregar e normalizar uma única vez
+        dados_silver = pd.read_parquet(origem)
+        medicoes = self._normalizar_medicoes(dados_silver)
+
+        logger.info("[Gold] Criando dimensões e tabela fato...")
+        # Criar dimensões
+        dim_estacao = self._criar_dim_estacao(dados_silver)
+        dim_parametro = self._criar_dim_parametro(medicoes)
+        dim_tempo = self._criar_dim_tempo(medicoes)
+
+        # Criar tabela fato
+        fato_medicoes = self._criar_fato_medicoes(
+            medicoes, dim_estacao, dim_parametro, dim_tempo
         )
 
-        logger.info(
-            f"[Silver] Validando a existencia do arquivo {nome_arquivo_silver}..."
-        )
-        if not os.path.exists(arquivo_bronze):
-            raise FileNotFoundError(
-                f"Arquivo {nome_arquivo_silver}.json não encontrado no Data Lake Silver."
+        logger.info("[Gold] Centralizando persistência de dados...")
+        # Centralizar a persistência
+        tabelas = {
+            "estacoes.parquet": dim_estacao,
+            "parametros.parquet": dim_parametro,
+            "tempo.parquet": dim_tempo,
+            "medicoes.parquet": fato_medicoes,
+        }
+
+        for nome, tabela in tabelas.items():
+            tabela.to_parquet(
+                destino / nome, engine="pyarrow", compression="snappy", index=False
             )
 
-        logger.info(
-            f"[Silver] Validando a extenção do arquivo {nome_arquivo_silver}..."
-        )
-        extensao_arquivo = os.path.splitext(nome_arquivo_silver)[1].lower()
+            logger.info(f"[Gold] {nome}: {len(tabela)} registros salvos.")
 
-        if extensao_arquivo != ".parquet":
-            raise ValueError(
-                f'Formato de arquivo não suportado: {extensao_arquivo}. Utlize arquivo ".parquet"!'
-            )
+        logger.info("==== [Gold] Processamento concluído ====")
 
-        logger.info(f"[Silver] Realizando leitura do arquivo {nome_arquivo_silver}...")
-        dados_silver = pd.read_parquet(arquivo_bronze)
-        # df_dim_estacoes = self._criar_df_dim_estacoes(dados_silver)
-        # df_dim_tempo = self.criar_df_dim_tempo(dados_silver)
-        self._criar_df_dim_parametro(dados_silver)
+        return tabelas
 
-        # df_dim_estacoes.to_parquet(
-        #     os.path.join(self.diretorio_gold, "estacoes.parquet"),
-        #     engine="pyarrow",
-        #     index=False,
-        #     compression="snappy",
-        # )
+    @staticmethod
+    def _converter_itens(valor):
+        if isinstance(valor, str):
+            valor = json.loads(valor)
+        elif isinstance(valor, np.ndarray):
+            valor = valor.tolist()
 
-        # Criação do DF de Estações
+        if not isinstance(valor, list):
+            raise ValueError("O campo itens deve conter uma lista JSON.")
 
-        # pd.DataFrame([dados_silver.cidade_estado, dados_silver.estacao_codigo])
-        # print(df_dim_estacoes)
+        return valor
 
-    def _criar_df_dim_estacoes(self, dados_silver: pd.DataFrame):
-        estacoes = (
-            dados_silver[
-                [
-                    "estacao_codigo",
-                    "estacao_nome",
-                    "cidade_estado",
-                    "municipio",
-                    "estacao_latitude",
-                    "estacao_longitude",
-                ]
-            ]
-            .drop_duplicates(subset="estacao_codigo")
+    def _normalizar_medicoes(self, dados_silver):
+        df = dados_silver[["registro_codigo", "estacao_codigo", "itens"]].copy()
+
+        df["itens"] = df["itens"].apply(self._converter_itens)
+
+        df = (
+            df.explode("itens", ignore_index=True)
+            .dropna(subset=["itens"])
             .reset_index(drop=True)
         )
-        estacoes.insert(0, "estacao_sk", range(1, len(estacoes) + 1))
-        return estacoes
 
-    def criar_df_dim_tempo(self, arquivo_silver: pd.DataFrame):
-        itens = pd.to_datetime(arquivo_silver["data_hora_ciclo"]).dt.date
-        dim_tempo = pd.DataFrame(
-            {"data": pd.date_range(start=itens.min(), end=itens.max(), freq="D")}
+        if df.empty:
+            raise ValueError("Não existem medições para processar.")
+
+        if not df["itens"].map(lambda item: isinstance(item, dict)).all():
+            raise ValueError("Cada medição deve ser um dicionário.")
+
+        parametros = pd.json_normalize(df["itens"].tolist())
+
+        medicoes = pd.concat([df.drop(columns=["itens"]), parametros], axis=1)
+
+        medicoes["data_hora_leitura"] = pd.to_datetime(
+            medicoes["data_hora_leitura"], errors="raise"
         )
 
-        dim_tempo.insert(
-            0, "tempo_sk", dim_tempo["data"].dt.strftime("%Y%m%d").astype(int)
-        )
-        dim_tempo["ano"] = dim_tempo["data"].dt.year
-        dim_tempo["mes"] = dim_tempo["data"].dt.month
-        dim_tempo["dia"] = dim_tempo["data"].dt.day
-        dim_tempo["trimestre"] = dim_tempo["data"].dt.quarter
-        dim_tempo["dia_semana"] = dim_tempo["data"].dt.day_of_week
-        dim_tempo["dia_util"] = dim_tempo["dia_semana"] < 5
+        medicoes["valor_lido"] = pd.to_numeric(medicoes["valor"], errors="raise")
 
-        return dim_tempo
+        obrigatorios = [
+            "registro_codigo",
+            "estacao_codigo",
+            "codigo_parametro",
+            "data_hora_leitura",
+            "valor_lido",
+        ]
 
-        # datas = pd.to_dateti  me(
-        #     itens.apply(
-        #         lambda item: (
-        #             item["data_hora_leitura"] if isinstance(item, dict) else None
-        #         )
-        #     ),
-        #     errors="coerce",
-        # ).dropna()
-        print(dim_tempo)
+        if medicoes[obrigatorios].isna().any().any():
+            raise ValueError("Existem medições com campos obrigatórios nulos.")
 
-        # dim_tempo = pd.DataFrame({"data_completa": pd.date_range(start=datas.min())})
+        if not np.isfinite(medicoes["valor_lido"]).all():
+            raise ValueError("Existem medições com valores infinitos.")
 
-    def _criar_df_dim_parametro(self, dados_silver: pd.DataFrame):
-        itens = self._tratar_leitura_itens(dados_silver)
-        df_dim_parametro = pd.DataFrame(itens)
-        df_dim_parametro.drop(columns=["data_hora_leitura", "valor"], inplace=True)
+        return medicoes
 
-        df_dim_parametro.to_parquet(
-            os.path.join(self.diretorio_gold, "as.parquet"),
-            engine="pyarrow",
-            index=False,
-            compression="snappy",
+    def _atribuir_sks(self, tabela, chave, sk, nome_arquivo):
+        if tabela[chave].isna().any():
+            raise ValueError(f"Chave nula na coluna {chave}")
+
+        tabela = tabela.drop_duplicates(subset=[chave], keep="last").reset_index(
+            drop=True
         )
 
-    def _criar_df_fato_medicoes(self):
-        pass
+        caminho = Path(self.diretorio_gold) / nome_arquivo
+
+        if caminho.exists():
+            anterior = pd.read_parquet(caminho)
+
+            if (
+                anterior[chave].duplicated().any()
+                or anterior[sk].duplicated().any()
+                or anterior[[chave, sk]].isna().any().any()
+            ):
+                raise ValueError(
+                    f"Dimensão anterior possui chaves inválidas: {nome_arquivo}"
+                )
+
+            # Manter SKs antigas e adicionar apenas novas entidades
+            novos = tabela[~tabela[chave].isin(anterior[chave])].copy()
+
+            proxima_sk = int(anterior[sk].max()) + 1 if not anterior.empty else 1
+
+            novos.insert(0, sk, range(proxima_sk, proxima_sk + len(novos)))
+
+            return pd.concat([anterior, novos], ignore_index=True)
+
+        # Primeira execução
+        tabela.insert(0, sk, range(1, len(tabela) + 1))
+
+        return tabela
+
+    def _criar_dim_estacao(self, dados_silver):
+        colunas = [
+            "estacao_codigo",
+            "estacao_nome",
+            "cidade_estado",
+            "municipio",
+            "estacao_latitude",
+            "estacao_longitude",
+        ]
+
+        return self._atribuir_sks(
+            dados_silver[colunas].copy(),
+            chave="estacao_codigo",
+            sk="estacao_sk",
+            nome_arquivo="estacoes.parquet",
+        )
+
+    def _criar_dim_parametro(self, medicoes):
+        colunas = ["codigo_parametro", "campo", "unidade_medida"]
+
+        return self._atribuir_sks(
+            medicoes[colunas].copy(),
+            chave="codigo_parametro",
+            sk="parametro_sk",
+            nome_arquivo="parametros.parquet",
+        )
+
+    def _criar_dim_tempo(self, medicoes):
+        datas = medicoes["data_hora_leitura"]
+
+        inicio = datas.min().normalize()
+        fim = datas.max().normalize()
+
+        # Preservar também o intervalo temporal já existente
+        caminho = Path(self.diretorio_gold) / "tempo.parquet"
+
+        if caminho.exists():
+            anterior = pd.read_parquet(caminho)
+            datas_anteriores = pd.to_datetime(anterior["data"])
+
+            inicio = min(inicio, datas_anteriores.min().normalize())
+            fim = max(fim, datas_anteriores.max().normalize())
+
+        dim = pd.DataFrame({"data": pd.date_range(inicio, fim, freq="D")})
+
+        dim["tempo_sk"] = dim["data"].dt.strftime("%Y%m%d").astype("int64")
+
+        dim["ano"] = dim["data"].dt.year
+        dim["mes"] = dim["data"].dt.month
+        dim["dia"] = dim["data"].dt.day
+        dim["trimestre"] = dim["data"].dt.quarter
+        dim["dia_semana"] = dim["data"].dt.dayofweek
+        dim["dia_util"] = dim["dia_semana"] < 5
+
+        return dim[
+            [
+                "tempo_sk",
+                "data",
+                "ano",
+                "mes",
+                "dia",
+                "trimestre",
+                "dia_semana",
+                "dia_util",
+            ]
+        ]
+
+    def _calcular_indicadores(self, fato):
+        fato = fato.sort_values(
+            ["estacao_sk", "parametro_sk", "data_hora_leitura"], kind="mergesort"
+        )
+
+        grupos = []
+
+        for _, grupo in fato.groupby(["estacao_sk", "parametro_sk"], sort=False):
+            grupo = grupo.copy()
+
+            # Média móvel temporal de 24 horas
+            grupo["media_movel"] = (
+                grupo.rolling("24h", on="data_hora_leitura", min_periods=1)[
+                    "valor_lido"
+                ]
+                .mean()
+                .to_numpy()
+            )
+
+            valores = grupo["valor_lido"]
+
+            # Tratamento específico para precipitação
+            if grupo["codigo_parametro"].iloc[0] == "TIP-CHU":
+                positivos = valores[valores > 0]
+
+                if len(positivos) >= 30:
+                    limite = positivos.quantile(0.99)
+                    grupo["indicador_outlier"] = valores > limite
+                else:
+                    grupo["indicador_outlier"] = False
+
+            else:
+                q1 = valores.quantile(0.25)
+                q3 = valores.quantile(0.75)
+                iqr = q3 - q1
+
+                if len(valores) >= 8 and iqr > 0:
+                    inferior = q1 - 1.5 * iqr
+                    superior = q3 + 1.5 * iqr
+
+                    grupo["indicador_outlier"] = (valores < inferior) | (
+                        valores > superior
+                    )
+                else:
+                    grupo["indicador_outlier"] = False
+
+            grupos.append(grupo)
+
+        return pd.concat(grupos, ignore_index=True)
+
+    def _criar_fato_medicoes(self, medicoes, dim_estacao, dim_parametro, dim_tempo):
+        # Relacionar estações
+        fato = medicoes.merge(
+            dim_estacao[["estacao_codigo", "estacao_sk"]],
+            on="estacao_codigo",
+            how="left",
+            validate="many_to_one",
+        )
+
+        # Relacionar parâmetros
+        fato = fato.merge(
+            dim_parametro[["codigo_parametro", "parametro_sk"]],
+            on="codigo_parametro",
+            how="left",
+            validate="many_to_one",
+        )
+
+        # Relacionar tempo
+        fato["tempo_sk"] = (
+            fato["data_hora_leitura"].dt.strftime("%Y%m%d").astype("int64")
+        )
+
+        # Validar integridade referencial
+        dimensoes = {
+            "estacao_sk": dim_estacao,
+            "parametro_sk": dim_parametro,
+            "tempo_sk": dim_tempo,
+        }
+
+        for sk, dimensao in dimensoes.items():
+            if fato[sk].isna().any():
+                raise ValueError(f"Chave {sk} contém valores nulos.")
+
+            if not fato[sk].isin(dimensao[sk]).all():
+                raise ValueError(f"Relacionamento inválido: {sk}")
+
+        # Evitar leituras duplicadas na fato
+        chaves = ["registro_codigo", "estacao_sk", "parametro_sk", "data_hora_leitura"]
+
+        if fato.duplicated(subset=chaves).any():
+            raise ValueError("Existem medições duplicadas na tabela fato.")
+
+        # Calcular os indicadores
+        fato = self._calcular_indicadores(fato)
+
+        return fato[
+            [
+                "registro_codigo",
+                "estacao_sk",
+                "parametro_sk",
+                "tempo_sk",
+                "data_hora_leitura",
+                "valor_lido",
+                "media_movel",
+                "indicador_outlier",
+            ]
+        ].copy()
 
     def _tratar_leitura_itens(self, dt_silver: pd.DataFrame):
         # Converter  string JSON em dicionário
@@ -271,20 +485,7 @@ class Extracao_Dados:
 
         return norm_parmetro
 
-    # print(type(i.iloc[0]))
-    # df_itens = pd.json_normalize(itens.explode(ignore_index=True).tolist())
-    # itens_limpo = df_itens.drop_duplicates(
-    #     subset=["codigo_parametro"], keep="last"
-    # ).to_dict(orient="records")
-
-    # df_dim_itens = pd.DataFrame(itens_limpo)
-    # # df_re = pd.concat([df_itens.drop(col)])
-    # print(df_itens)
-    # arquivo_saida =
-
     def execute(self):
+        self.extrair_dados_bronze(api_result.json())
+        self.extrair_dados_silver("dados_bronze.json")
         self.extrair_dados_gold()
-
-    #     result = api_result.json()
-    #     self.extrair_dados_bronze(result)
-    #     self.extrair_dados_silver("dados_bronze.json")
