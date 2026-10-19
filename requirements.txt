@@ -1,6 +1,7 @@
 pydantic
 python-dotenv
 mssql-python
+flask
 fastapi
 uvicorn
 requests

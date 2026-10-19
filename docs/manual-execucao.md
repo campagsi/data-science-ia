@@ -144,6 +144,30 @@ O endpoint de verificacao fica em `GET /health`.
 
 ## 6. Executar a aplicação
 
+### Interface gráfica (dashboard web)
+
+Na raiz de `Data-Science-Ia`, com o ambiente virtual ativado e as variáveis de ambiente configuradas, inicie o servidor Flask:
+
+```bash
+python -m flask --app src.ui.app run --host 127.0.0.1 --port 5000
+```
+
+Abra <http://127.0.0.1:5000> no navegador. O dashboard permite:
+
+- filtrar as medições por estação, parâmetro e período (com atalhos de 7, 30 e 90 dias até a última medição);
+- ver a série temporal por **semana, mês, ano ou tudo**, navegando entre períodos (botões ‹ › ou setas do teclado), com média, faixa mín.–máx., anomalias marcadas, comparação com o período anterior e o perfil médio por hora do dia. Clicar em um ponto abre o mês ou a semana correspondente. A "escala ajustada" impede que picos isolados achatem a série; "Escala completa" mostra o eixo inteiro;
+- navegar pelas tabelas de resumo estatístico, alertas e medições **paginadas** (10, 25, 50 ou 100 linhas por página);
+- exportar **todo** o recorte filtrado em CSV (separador `;`, decimal com vírgula), não só a página exibida;
+- alternar entre tema claro e escuro.
+
+As medições ficam em memória por até 2 minutos (ou até a próxima ingestão pelo dashboard), então a troca de página e de período não repete a consulta ao banco. O gráfico consome `GET /api/serie?codigo=<parâmetro>` com os mesmos filtros da página, que devolve baldes horários já agregados.
+
+Para executar a ingestão pelo dashboard, mantenha também a API de ingestão da seção 5 ativa em outro terminal. O dashboard consulta os dados existentes no Azure SQL; portanto, configure `AZURE_SQL_CONNECTIONSTRING` e prepare o banco conforme a seção 4. A ingestão também precisa de `FONTE_DADOS` e `CHAVE_CRIPTOGRAFIA` válidos.
+
+Para encerrar o servidor web, pressione `Ctrl+C` no terminal em que o Flask está rodando.
+
+### Interface de consulta no terminal
+
 ```bash
 python main.py
 ```
@@ -154,7 +178,7 @@ Ao iniciar, `iniciar_aplicacao()` executa, nesta ordem:
 2. `load_config()`: exige `AZURE_SQL_CONNECTIONSTRING`, `FONTE_DADOS` e `CHAVE_CRIPTOGRAFIA`;
 3. `configurar_seguranca()`: valida a chave Fernet e a chave de hash.
 
-Se qualquer passo falhar, a aplicação registra a causa com nível `CRITICAL` e termina com código `1`, sem mostrar senhas nem chaves. Depois, abre a interface de consulta no terminal (`src/cli`), que lê o banco.
+Se qualquer passo falhar, a aplicação registra a causa com nível `CRITICAL` e termina com código `1`, sem mostrar senhas nem chaves. Esse comando abre a interface de consulta no terminal (`src/cli`), que lê o banco. Para iniciar a interface gráfica web, use o comando Flask descrito acima.
 
 ### Ingestão (carga no banco)
 
@@ -189,7 +213,7 @@ python main.py --analise --inicio 2026-06-01 --fim 2026-06-30 # intervalo (só -
 
 O relatório (métricas por estação e parâmetro) vai para o log da execução em `INFO`, e cada medição anômala vai numa linha `WARNING` com o indicador de alerta (`IQR`, `ZSCORE` ou `IQR+ZSCORE`). Estação inexistente encerra com `CRITICAL` e código `1`. As mesmas métricas podem ser conferidas direto no banco com [sql/queries_analiticas.sql](../sql/queries_analiticas.sql). Regras em [analise-estatistica.md](analise-estatistica.md).
 
-### Interface de consulta
+### Interface de consulta no terminal
 
 `python main.py` sem argumentos abre a CLI: escolha o município, a estação e o período (datas em `dd/mm/aaaa`). A tela mostra as métricas de todos os parâmetros e as anomalias; a opção `0` salva `estatisticas.csv` e `anomalias.csv` em `relatorios/` (fora do Git).
 

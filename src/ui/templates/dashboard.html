@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Leituras das estações | Dados Ambientais</title>
+  <script>
+    try { const tema = localStorage.getItem("da-tema"); if (tema) document.documentElement.dataset.theme = tema; } catch (erro) {}
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <script src="{{ url_for('static', filename='period-chart.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
+</head>
+<body>
+{% macro paginacao(pagina, nome, ancora, rotulo) %}
+  {% if pagina.total > pagina.por_pagina %}
+  <nav class="pagination" aria-label="Paginação de {{ rotulo }}">
+    <span class="pagination-info">{{ pagina.inicio | milhar }}–{{ pagina.fim | milhar }} de {{ pagina.total | milhar }}</span>
+    <div class="pagination-pages">
+      {% if pagina.tem_anterior %}<a class="page-link page-step" href="{{ url_pagina(nome, pagina.numero - 1, ancora) }}" rel="prev" aria-label="Página anterior">‹ Anterior</a>
+      {% else %}<span class="page-link page-step is-disabled" aria-hidden="true">‹ Anterior</span>{% endif %}
+      {% for numero in pagina.paginas_visiveis() %}
+        {% if numero is none %}<span class="page-gap" aria-hidden="true">…</span>
+        {% elif numero == pagina.numero %}<span class="page-link is-current" aria-current="page">{{ numero | milhar }}</span>
+        {% else %}<a class="page-link" href="{{ url_pagina(nome, numero, ancora) }}" aria-label="Página {{ numero }}">{{ numero | milhar }}</a>{% endif %}
+      {% endfor %}
+      {% if pagina.tem_proxima %}<a class="page-link page-step" href="{{ url_pagina(nome, pagina.numero + 1, ancora) }}" rel="next" aria-label="Próxima página">Próxima ›</a>
+      {% else %}<span class="page-link page-step is-disabled" aria-hidden="true">Próxima ›</span>{% endif %}
+    </div>
+  </nav>
+  {% endif %}
+{% endmacro %}
+{% macro valor(numero, casas=2) %}{{ numero | decimal(casas) if numero is not none else "—" }}{% endmacro %}
+
+  <div class="app-shell">
+    <aside class="control-rail">
+      <div class="rail-top">
+        <a class="wordmark" href="/" aria-label="Dados Ambientais, início">
+          <span class="wordmark-mark" aria-hidden="true">DA</span>
+          <span>Dados<br>Ambientais</span>
+        </a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Alternar tema claro ou escuro" title="Alternar tema">
+          <span class="theme-icon" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <section class="rail-section" aria-labelledby="operation-title">
+        <p class="eyebrow">Operação</p>
+        <h2 id="operation-title">Carga de dados</h2>
+        <p class="muted">Busca a fonte configurada, valida o lote e grava as leituras aprovadas.</p>
+        <button class="button button-primary" id="ingest-button" type="button">
+          <span class="button-icon" aria-hidden="true">↻</span> Executar ingestão
+        </button>
+        <p class="ingest-status" id="ingest-status" role="status" aria-live="polite"></p>
+        <div class="ingest-summary" id="ingest-summary" hidden></div>
+      </section>
+
+      <form class="filter-form" method="get" action="/">
+        <div class="section-rule"></div>
+        <p class="eyebrow">Exploração</p>
+        <h2>Filtrar leituras</h2>
+        <label for="station-filter">Estação</label>
+        <select id="station-filter" name="estacao">
+          <option value="">Todas as estações</option>
+          {% for station_id, code, name in estacoes %}
+          <option value="{{ station_id }}" {% if station_id == estacao_selecionada %}selected{% endif %}>{{ code }} · {{ name }}</option>
+          {% endfor %}
+        </select>
+        <label for="parameter-filter">Parâmetro</label>
+        <select id="parameter-filter" name="parametro">
+          <option value="">Todos os parâmetros</option>
+          {% for code, name, unit in parametros %}
+          <option value="{{ code }}" {% if code == parametro_selecionado %}selected{% endif %}>{{ name }} ({{ unit }})</option>
+          {% endfor %}
+        </select>
+        <div class="date-pair">
+          <div>
+            <label for="start-date">Data inicial</label>
+            <input id="start-date" type="date" name="inicio" value="{{ inicio }}">
+          </div>
+          <div>
+            <label for="end-date">Data final</label>
+            <input id="end-date" type="date" name="fim" value="{{ fim }}">
+          </div>
+        </div>
+        <div class="date-presets" role="group" aria-label="Atalhos de período (até a última medição)" data-last-date="{{ ultima_data }}">
+          <button type="button" data-preset="7">7 dias</button>
+          <button type="button" data-preset="30">30 dias</button>
+          <button type="button" data-preset="90">90 dias</button>
+          <button type="button" data-preset="0">Tudo</button>
+        </div>
+        {% if por_pagina != 25 %}<input type="hidden" name="por_pagina" value="{{ por_pagina }}">{% endif %}
+        <button class="button button-secondary" type="submit">Aplicar filtros</button>
+        <a class="clear-filters" href="/">Limpar filtros</a>
+      </form>
+
+      <div class="rail-footnote">Banco relacional · SQL Server</div>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Monitoramento ambiental <span class="eyebrow-dot">/</span> Data Science</p>
+          <h1>Leituras das estações</h1>
+          <p class="muted">
+            {% if periodo %}Recorte de {{ periodo[0] | data_br }} a {{ periodo[1] | data_br }}.{% else %}Acompanhe medições e sinais de qualidade dos dados.{% endif %}
+          </p>
+        </div>
+        {% if estacao_selecionada or parametro_selecionado or inicio or fim %}
+        <div class="active-filters" aria-label="Filtros ativos">
+          {% for station_id, code, name in estacoes if station_id == estacao_selecionada %}<span class="chip">{{ code }}</span>{% endfor %}
+          {% for code, name, unit in parametros if code == parametro_selecionado %}<span class="chip">{{ name }}</span>{% endfor %}
+          {% if inicio or fim %}<span class="chip">{{ (inicio | data_br) if inicio else "…" }} → {{ (fim | data_br) if fim else "…" }}</span>{% endif %}
+        </div>
+        {% endif %}
+      </header>
+
+      {% if erro_banco %}
+      <div class="notice notice-error" role="alert">Não foi possível consultar o banco. Confira a conexão e as permissões.</div>
+      {% elif not tem_dados %}
+      <div class="notice notice-empty">Ainda não há medições para exibir. Execute uma ingestão quando a API de origem estiver disponível.</div>
+      {% elif not total_medicoes %}
+      <div class="notice notice-empty">Nenhuma medição corresponde aos filtros atuais.</div>
+      {% endif %}
+      {% if erro_filtros %}<div class="notice notice-error" role="alert">{{ erro_filtros }}</div>{% endif %}
+
+      <section class="metrics-grid" aria-label="Indicadores do recorte">
+        <article class="metric"><span class="metric-label">Leituras</span><strong>{{ analise.leituras | milhar }}</strong><span class="metric-note">registros distintos</span></article>
+        <article class="metric"><span class="metric-label">Medições</span><strong>{{ analise.medicoes | milhar }}</strong><span class="metric-note">valores analisados</span></article>
+        <article class="metric"><span class="metric-label">Parâmetros</span><strong>{{ analise.estatisticas | map(attribute="Código") | unique | list | length }}</strong><span class="metric-note">no recorte atual</span></article>
+        <article class="metric metric-alert">
+          <span class="metric-label"><span class="status-icon" aria-hidden="true">▲</span> Anomalias</span>
+          <strong>{{ analise.anomalias | length | milhar }}</strong>
+          <span class="metric-note">{% if analise.medicoes %}{{ (100 * (analise.anomalias | length) / analise.medicoes) | decimal(2) }}% das medições · IQR / Z-Score{% else %}alertas IQR / Z-Score{% endif %}</span>
+        </article>
+      </section>
+
+      <section class="visual-section" id="serie" aria-labelledby="series-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Série temporal</p><h2 id="series-title">Variação por período</h2></div>
+          <span class="record-count">{{ total_medicoes | milhar }} medições no recorte</span>
+        </div>
+        {% if parametros_no_recorte %}
+        <div class="period-chart" data-period-chart data-source="{{ url_serie }}"
+             data-parameter="{{ parametro_selecionado or parametros_no_recorte[0][0] }}">
+          <script type="application/json" data-parameters>{{ parametros_no_recorte | tojson }}</script>
+          <noscript><p class="muted">Ative o JavaScript para ver o gráfico.</p></noscript>
+        </div>
+        {% else %}
+        <div class="empty-chart"><span class="empty-chart-symbol" aria-hidden="true">⌁</span><span>O gráfico aparecerá quando houver medições no período.</span></div>
+        {% endif %}
+      </section>
+
+      <section class="analysis-section" id="estatisticas" aria-labelledby="analysis-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Qualidade e distribuição</p><h2 id="analysis-title">Resumo estatístico</h2></div>
+          {% if pagina_estatisticas.total %}<span class="record-count">{{ pagina_estatisticas.total | milhar }} combinações estação × parâmetro</span>{% endif %}
+        </div>
+        {% if pagina_estatisticas.itens %}
+        <div class="table-scroll"><table>
+          <thead><tr><th>Estação</th><th>Parâmetro</th><th>Unidade</th><th class="num">Qtd.</th><th class="num">Média</th><th class="num">Mediana</th><th class="num">Desvio</th><th class="num">Mínimo</th><th class="num">Máximo</th><th>Faixa</th><th class="num">Anomalias</th><th><span class="sr-only">Ações</span></th></tr></thead>
+          <tbody>{% for row in pagina_estatisticas.itens %}
+            <tr>
+              <td>{{ row["Estação"] }}</td><td>{{ row["Parâmetro"] }}</td><td>{{ row["Unidade"] }}</td>
+              <td class="num">{{ row["Quantidade"] | milhar }}</td>
+              <td class="num">{{ valor(row["Média"]) }}</td><td class="num">{{ valor(row["Mediana"]) }}</td><td class="num">{{ valor(row["Desvio Padrão"]) }}</td>
+              <td class="num">{{ valor(row["Mínimo"]) }}</td><td class="num">{{ valor(row["Máximo"]) }}</td>
+              <td>{% if row["Máximo"] is not none and row["Mínimo"] is not none and row["Máximo"] > row["Mínimo"] and row["Q1"] is not none %}
+                {% set amplitude = row["Máximo"] - row["Mínimo"] %}
+                <span class="range-bar" title="Mín. {{ valor(row['Mínimo']) }} · Q1 {{ valor(row['Q1']) }} · Mediana {{ valor(row['Mediana']) }} · Q3 {{ valor(row['Q3']) }} · Máx. {{ valor(row['Máximo']) }}"
+                      style="--q1: {{ ((row['Q1'] - row['Mínimo']) / amplitude * 100) | round(1) }}%; --q3: {{ ((row['Q3'] - row['Mínimo']) / amplitude * 100) | round(1) }}%; --med: {{ ((row['Mediana'] - row['Mínimo']) / amplitude * 100) | round(1) }}%"></span>
+              {% else %}—{% endif %}</td>
+              <td class="num">{% if row["Anomalias"] %}<span class="alert-count">{{ row["Anomalias"] | milhar }}</span>{% else %}0{% endif %}</td>
+              <td><button class="text-button" type="button" data-show-parameter="{{ row['Código'] }}">Ver no gráfico</button></td>
+            </tr>{% endfor %}
+          </tbody>
+        </table></div>
+        {{ paginacao(pagina_estatisticas, "pagina_estatisticas", "estatisticas", "resumo estatístico") }}
+        <p class="table-note">Faixa: barra do mínimo ao máximo, com o intervalo interquartil (Q1–Q3) destacado e a mediana marcada.</p>
+        {% else %}<p class="muted section-empty">Não há dados suficientes para calcular estatísticas.</p>{% endif %}
+      </section>
+
+      <section class="analysis-section" id="alertas" aria-labelledby="anomalies-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Integridade</p><h2 id="anomalies-title">Alertas de qualidade</h2></div>
+          {% if pagina_alertas.total %}<span class="record-count">{{ pagina_alertas.total | milhar }} alertas</span>{% endif %}
+        </div>
+        {% if pagina_alertas.itens %}<div class="table-scroll"><table>
+          <thead><tr><th>Data</th><th>Estação</th><th>Parâmetro</th><th class="num">Valor</th><th class="num">Limite inferior</th><th class="num">Limite superior</th><th class="num">Z-Score</th><th>Alerta</th><th><span class="sr-only">Ações</span></th></tr></thead>
+          <tbody>{% for row in pagina_alertas.itens %}
+            <tr>
+              <td>{{ row["Data"] | data_hora_br }}</td><td>{{ row["Estação"] }}</td><td>{{ row["Parâmetro"] }}</td>
+              <td class="num">{{ valor(row["Valor"]) }} <span class="unit">{{ row["Unidade"] }}</span></td>
+              <td class="num">{{ valor(row["Limite Inferior"]) }}</td><td class="num">{{ valor(row["Limite Superior"]) }}</td>
+              <td class="num">{{ valor(row["Z-Score"]) }}</td>
+              <td><span class="alert-tag"><span aria-hidden="true">▲</span> {{ row["Alerta"] }}</span></td>
+              <td><button class="text-button" type="button" data-show-parameter-name="{{ row['Parâmetro'] }}" data-show-date="{{ row['Data'] | iso }}">Ver semana</button></td>
+            </tr>{% endfor %}
+          </tbody>
+        </table></div>
+        {{ paginacao(pagina_alertas, "pagina_alertas", "alertas", "alertas de qualidade") }}
+        {% else %}<p class="muted section-empty">Nenhuma anomalia identificada pelas regras IQR e Z-Score.</p>{% endif %}
+      </section>
+
+      <section class="analysis-section readings-section" id="medicoes" aria-labelledby="readings-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Registros observados</p><h2 id="readings-title">Medições</h2></div>
+          {% if pagina_medicoes.total %}
+          <div class="table-actions">
+            <form class="per-page" method="get" action="/#medicoes">
+              {% for chave, valor_arg in request.args.items() if chave not in ("por_pagina", "pagina", "pagina_alertas", "pagina_estatisticas") %}<input type="hidden" name="{{ chave }}" value="{{ valor_arg }}">{% endfor %}
+              <label for="per-page">Linhas por página</label>
+              <select id="per-page" name="por_pagina" data-autosubmit>
+                {% for opcao in opcoes_por_pagina %}<option value="{{ opcao }}" {% if opcao == por_pagina %}selected{% endif %}>{{ opcao }}</option>{% endfor %}
+              </select>
+              <noscript><button type="submit">Aplicar</button></noscript>
+            </form>
+            <a class="text-button" href="{{ url_csv }}" download>↓ Exportar CSV ({{ pagina_medicoes.total | milhar }})</a>
+          </div>
+          {% endif %}
+        </div>
+        {% if pagina_medicoes.itens %}<div class="table-scroll"><table id="readings-table">
+          <thead><tr><th>Data e hora</th><th>Registro</th><th>Estação</th><th>Parâmetro</th><th>Unidade</th><th class="num">Valor</th></tr></thead>
+          <tbody>{% for row in pagina_medicoes.itens %}<tr><td>{{ row.data_hora | data_hora_br }}</td><td>{{ row.codigo_registro }}</td><td>{{ row.estacao_codigo }}</td><td>{{ row.parametro }}</td><td>{{ row.unidade_medida }}</td><td class="num">{{ row.valor | decimal(3) }}</td></tr>{% endfor %}</tbody>
+        </table></div>
+        {{ paginacao(pagina_medicoes, "pagina", "medicoes", "medições") }}
+        {% else %}<p class="muted section-empty">Nenhuma medição corresponde aos filtros atuais.</p>{% endif %}
+      </section>
+      <footer class="page-footer">Dados consultados do banco relacional · Dados pessoais não são exibidos</footer>
+    </main>
+  </div>
+</body>
+</html>

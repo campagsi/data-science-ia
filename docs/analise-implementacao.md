@@ -636,3 +636,13 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 - **Alterado:** variável de ambiente (`.env`, `.env.example`), `Settings.chave_hash` em `src/config.py`, parâmetro e variável interna de `src/security.py`, `main.py`, testes e documentação. Comportamento igual: preenchida = HMAC-SHA256, vazia = SHA-256 puro.
 - **Atenção:** o valor não muda, só o nome. Em cada máquina, renomear a linha `PEPPER_HASH=` do `.env` para `CHAVE_HASH=` mantendo o valor. Como a variável é opcional, um `.env` com o nome antigo não gera erro: o hash vira SHA-256 puro e os operadores já gravados seriam cadastrados de novo.
 - **Validação:** `205 passed, 18 skipped` sem banco de teste; `223 passed` com ele.
+
+
+### Ajuste — dashboard web: paginação e gráfico por período (17/10/2026)
+
+- **Motivo:** a página renderizava todas as medições do recorte (≈104 mil linhas com a carga real) na tabela e de novo em JSON para o gráfico, o que deixava a página com dezenas de MB e lenta. O gráfico só agrupava por hora, dia ou semana, sem navegação entre períodos.
+- **`src/ui/visualizacao.py` (novo):** `paginar` / `Pagina` (fatia, intervalo exibido e números de página com reticências), leitura segura de `pagina` e `por_pagina` (10, 25, 50 ou 100), `agregar_por_hora` (baldes `[hora, quantidade, soma, mín., máx.]`, que se combinam sem perda) e filtros de template em formato pt-BR.
+- **`src/ui/app.py`:** tabelas de resumo, alertas e medições paginadas no servidor (medições mais recentes primeiro); `GET /api/serie` devolve a série horária e as anomalias de um parâmetro no recorte; `GET /exportar.csv` exporta o recorte inteiro; cache em memória das medições (2 min) e das análises por recorte, descartado após a ingestão. A página passou a ≈40 KB.
+- **`src/ui/static/period-chart.js` (novo):** plugin JavaScript (Chart.js) de visualização por semana, mês, ano ou tudo, com navegação, indicadores do período, variação contra o período anterior, faixa mín.–máx., anomalias, perfil por hora do dia, escala ajustada (Q1/Q3 ± 3×IQR das médias horárias) e tabela do período. Uso: `<div data-period-chart data-source="/api/serie?...">`.
+- **Interface:** tema claro/escuro, atalhos de período, indicador de faixa (mín., Q1–Q3, mediana) no resumo estatístico, atalhos "Ver no gráfico" e "Ver semana" nas tabelas, layout de celular revisado.
+- **Testes:** `tests/unit/test_ui_visualizacao.py` (novo) e `tests/unit/test_ui_app.py` (paginação, API da série, CSV e cache). `239 passed, 18 skipped` sem banco de teste.
