@@ -31,7 +31,9 @@ CAMPOS_PESSOAIS = frozenset(
 # Marca as linhas do cabeçalho de cada arquivo (etapa que o criou e por quê).
 MARCADOR_CABECALHO = "[cabeçalho]"
 
-_SO_LEITURA = "nenhum. Esta etapa não importa dados, por isso o arquivo tem só este cabeçalho"
+_SO_LEITURA = (
+    "nenhum. Esta etapa não importa dados, por isso o arquivo tem só este cabeçalho"
+)
 
 # Etapa → como foi executada, o que faz e o que cada arquivo registra.
 ETAPAS = {
@@ -39,15 +41,15 @@ ETAPAS = {
         "execucao": "Ingestão (python main.py --ingestao)",
         "objetivo": "coleta o lote na API, normaliza, anonimiza, valida e grava no banco 3FN",
         "pipeline": "andamento, avisos, erros e a linha 'Resumo da ingestão' com recebidos, "
-                    "válidos, inválidos e gravados. O que não foi importado está em {rejeitados}",
+        "válidos, inválidos e gravados. O que não foi importado está em {rejeitados}",
         "rejeitados": "uma linha por leitura recusada (nivel=leitura) ou medição descartada "
-                      "(nivel=item), com etapa, campo e motivo; valores pessoais nunca aparecem",
+        "(nivel=item), com etapa, campo e motivo; valores pessoais nunca aparecem",
     },
     "analise": {
         "execucao": "Análise estatística (python main.py --analise)",
         "objetivo": "lê as medições gravadas, calcula as métricas e sinaliza anomalias (IQR e Z-Score)",
         "pipeline": "o relatório estatístico em INFO e uma linha WARNING 'Alerta de qualidade' "
-                    "por medição anômala",
+        "por medição anômala",
         "rejeitados": _SO_LEITURA,
     },
     "consulta": {
@@ -132,19 +134,31 @@ def __escrever_cabecalho(etapa: str, arquivos: dict[str, Path]) -> None:
         f"com a data/hora de início no nome; esta execução {descricao['objetivo']}.",
     ]
     linhas = {
-        "pipeline": comum + [
+        "pipeline": comum
+        + [
             f"Conteúdo: {descricao['pipeline'].format(rejeitados=arquivos['rejeitados'].name)}."
         ],
         "rejeitados": comum + [f"Conteúdo: {descricao['rejeitados']}."],
     }
     alvos = {
-        "pipeline": [h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler)],
+        "pipeline": [
+            h
+            for h in logging.getLogger().handlers
+            if isinstance(h, logging.FileHandler)
+        ],
         "rejeitados": logger_rejeitados.handlers,
     }
     for nome, handlers in alvos.items():
         for texto in linhas[nome]:
-            registro = logging.LogRecord(NOME_LOGGER, logging.INFO, __file__, 0,
-                                         f"{MARCADOR_CABECALHO} {texto}", None, None)
+            registro = logging.LogRecord(
+                NOME_LOGGER,
+                logging.INFO,
+                __file__,
+                0,
+                f"{MARCADOR_CABECALHO} {texto}",
+                None,
+                None,
+            )
             for handler in handlers:
                 handler.handle(registro)
 
@@ -176,7 +190,9 @@ def registrar_rejeicao(
     __rejeicoes[nivel] += 1
 
 
-def registrar_resultados_validacao(resultados: list[dict]) -> dict[str, int]:
+def registrar_resultados_validacao(
+    resultados: list[dict], nivel: str = "leitura"
+) -> dict[str, int]:
     """
     Grava no log de rejeitados o que a validação recusou e devolve as contagens.
 
@@ -192,8 +208,13 @@ def registrar_resultados_validacao(resultados: list[dict]) -> dict[str, int]:
             contagens["registros_invalidos"] += 1
             for motivo in resultado["motivos"]:
                 registrar_rejeicao(
-                    motivo["etapa"], "leitura", motivo["campo"], motivo["motivo"],
-                    registro=registro, valor=motivo["valor"],
+                    motivo["etapa"],
+                    nivel,
+                    motivo["campo"],
+                    motivo["motivo"],
+                    registro=registro,
+                    valor=motivo["valor"],
+                    severidade=logging.WARNING if nivel == "leitura" else logging.ERROR,
                 )
             continue
 
@@ -202,13 +223,23 @@ def registrar_resultados_validacao(resultados: list[dict]) -> dict[str, int]:
         contagens["itens_invalidos"] += len(resultado["itens_invalidos"])
         for item in resultado["itens_invalidos"]:
             registrar_rejeicao(
-                item["etapa"], "item", item["campo"], item["motivo"],
-                registro=registro, valor=item["valor"],
+                item["etapa"],
+                nivel,
+                item["campo"],
+                item["motivo"],
+                registro=registro,
+                valor=item["valor"],
+                severidade=logging.WARNING if nivel == "leitura" else logging.ERROR,
             )
 
     return {
         chave: contagens[chave]
-        for chave in ("registros_validos", "registros_invalidos", "itens_validos", "itens_invalidos")
+        for chave in (
+            "registros_validos",
+            "registros_invalidos",
+            "itens_validos",
+            "itens_invalidos",
+        )
     }
 
 
@@ -234,9 +265,13 @@ def registrar_anomalias(anomalias: list[dict]) -> None:
             if anomalia["Limite Inferior"] is not None
             else "[sem IQR]"
         )
-        zscore = f"{anomalia['Z-Score']:.2f}" if anomalia["Z-Score"] is not None else "indefinido"
+        zscore = (
+            f"{anomalia['Z-Score']:.2f}"
+            if anomalia["Z-Score"] is not None
+            else "indefinido"
+        )
         logger.warning(
-            f"Alerta de qualidade: alerta={anomalia['Alerta']} estacao=\"{anomalia['Estação']}\" "
-            f"registro={anomalia['Registro']} parametro=\"{anomalia['Parâmetro']}\" "
+            f'Alerta de qualidade: alerta={anomalia["Alerta"]} estacao="{anomalia["Estação"]}" '
+            f'registro={anomalia["Registro"]} parametro="{anomalia["Parâmetro"]}" '
             f"data_hora={anomalia['Data']} valor={anomalia['Valor']} limites_iqr={limites} zscore={zscore}"
         )

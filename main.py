@@ -7,6 +7,7 @@ from src.cli.console_app import Console_APP
 from src.config import Settings, load_config
 from src.database.connection import DatabaseConnection
 from src.ingestion.data_client import DataClient
+from src.ingestion.extracao_dados import Extracao_Dados
 from src.logger import (
     configurar_logs,
     logger,
@@ -14,16 +15,11 @@ from src.logger import (
     registrar_resultados_validacao,
     registrar_resumo,
 )
-from src.repository.estado_repository import EstadoRepository
 from src.repository.leitura_repository import LeituraRepository
-from src.repository.parametro_repository import ParametroRepository
 from src.security import configurar_seguranca
 from src.services.analytics_service import AnaliticsService
-from src.services.normalization_service import NormalizationService
-from src.services.parametro_service import ParametroService
 from src.services.report_service import ReportService
 from src.services.validation_service import ValidationService
-
 
 # Chaves do resumo da ingestão, na ordem em que aparecem no log.
 _CAMPOS_RESUMO = (
@@ -56,12 +52,27 @@ def run_pipeline() -> dict[str, int]:
         registrar_resumo(**resumo)
         return resumo
 
+    # Realiza a extração dos dados para camada Bronze, salvando o arquivo em JSON
+    extracao_dados = Extracao_Dados(
+        fonte_dados=settings.fonte_dados, diretorio_base="data_lake"
+    )
+    log = extracao_dados.extrair_dados_bronze(raw_data)
+    registrar_resultados_validacao(resultados=log, nivel="Registro")
+    # validacao = registrar_resultados_validacao(resultados=normalized_data_silver)
     # 2. Tratamento: texto vazio vira None, números e datas são convertidos,
     #    cada registro vira cabeçalho + itens (um por parâmetro) e CPF, nome e
     #    e-mail do operador são anonimizados. Valor que não pode ser convertido
     #    é rejeitado e logado aqui, sem derrubar o lote; medição vazia segue
     #    como None para a validação decidir.
-    normalized_data = NormalizationService().normalize(raw_data)
+    # normalized_data = NormalizationService().normalize(raw_data)
+
+    # Realia a extração dos dados para a camada silver a partir dos dados extraidos pela camda bronze
+    normalized_data_silver, parametros = extracao_dados.extrair_dados_silver(
+        "dados_bronze.json"
+    )
+
+    # Realiza a extração de dados para a camada gold a partir dos dados extraidos pela camada silver
+    extracao_dados.extrair_dados_gold("dados_silver.parquet")
 
     # O schema é mantido por sql/ddl_banco_relacional.sql e sql/migrations/.
     database = DatabaseConnection(settings.azure_sql_connectionstring)
@@ -69,12 +80,12 @@ def run_pipeline() -> dict[str, int]:
     # 3. Parâmetros: os encontrados no lote (*_tipo_codigo) e ainda não
     #    cadastrados são inseridos em Parametros, sem faixa. Volta o mapa
     #    código → parâmetro aceito, com id e faixa de valores.
-    parametros = ParametroService(ParametroRepository(database)).sincronizar(
-        NormalizationService.descobrir_parametros(normalized_data)
-    )
+    # parametros = ParametroService(ParametroRepository(database)).sincronizar(
+    #     NormalizationService.descobrir_parametros(normalized_data_silver)
+    # )
 
     # 4. Referência: siglas de Estados, para conferir o estado de cada leitura.
-    siglas = {estado.sigla for estado in EstadoRepository(database).get_all()}
+    # siglas = {estado.sigla for estado in EstadoRepository(database).get_all()}
 
     # 5. Validação, antes de qualquer gravação. Não grava nem loga: devolve um
     #    resultado por registro (valido, campos_nulos, itens_invalidos, motivos).
@@ -83,18 +94,18 @@ def run_pipeline() -> dict[str, int]:
     #    - acurácia: valor fora da faixa do parâmetro descarta só o item;
     #    - referência e validade: estado inexistente ou sigla inválida;
     #    - unicidade: registro repetido no lote e cadastro divergente.
-    resultados = ValidationService(
-        faixas=ParametroService.faixas(parametros),
-        siglas_estados=siglas,
-        parametros_validos=set(parametros),
-    ).validate_data(normalized_data)
+    # resultados = ValidationService(
+    #     faixas=ParametroService.faixas(parametros),
+    #     siglas_estados=siglas,
+    #     parametros_validos=set(parametros),
+    # ).validate_data(normalized_data)
 
     # 6. Log de rejeitados a partir dos resultados: uma linha por leitura
     #    recusada e uma por medição descartada (sem dado pessoal).
-    validacao = registrar_resultados_validacao(resultados)
+    validacao = registrar_resultados_validacao(resultados=normalized_data_silver)
 
     # 7. Filtro: só os registros com valido=True, já sem os itens descartados.
-    validated_data = ValidationService.registros_validos(resultados)
+    validated_data = ValidationService.registros_validos(normalized_data_silver)
 
     # 8. Gravação idempotente, numa única transação: municípios, operadores e
     #    estações por MERGE; leituras e itens substituindo as partições
@@ -107,7 +118,7 @@ def run_pipeline() -> dict[str, int]:
     # 9. Resumo da execução no log (e retorno da função).
     resumo = {
         "recebidos": len(raw_data),
-        "rejeitados_na_normalizacao": len(raw_data) - len(normalized_data),
+        "rejeitados_na_normalizacao": len(raw_data) - len(normalized_data_silver),
         "registros_validos": validacao["registros_validos"],
         "registros_invalidos": validacao["registros_invalidos"],
         "itens_descartados": validacao["itens_invalidos"],
@@ -140,7 +151,9 @@ def gerar_relatorio(
         estacao_id = estacao.id_estacao
 
     relatorio = ReportService().generate_report(
-        analise.calculate_metrics(estacao_id=estacao_id, data_inicio=data_inicio, data_fim=data_fim)
+        analise.calculate_metrics(
+            estacao_id=estacao_id, data_inicio=data_inicio, data_fim=data_fim
+        )
     )
     _exibir_resultados(relatorio)
     registrar_anomalias(relatorio["anomalias"])
@@ -171,15 +184,29 @@ def ler_argumentos(argv: list[str]) -> argparse.Namespace:
     """Sem argumentos abre a CLI; --ingestao carrega o banco; --analise gera o relatório."""
     parser = argparse.ArgumentParser(description="Pipeline de dados ambientais")
     modo = parser.add_mutually_exclusive_group()
-    modo.add_argument("--ingestao", action="store_true", help="coleta, valida e grava no banco")
-    modo.add_argument("--analise", action="store_true", help="estatística e outliers das medições gravadas")
-    parser.add_argument("--estacao", metavar="CODIGO", help="código da estação (padrão: todas)")
-    parser.add_argument("--inicio", type=date.fromisoformat, metavar="AAAA-MM-DD",
-                        help="sozinha, analisa só esse dia")
+    modo.add_argument(
+        "--ingestao", action="store_true", help="coleta, valida e grava no banco"
+    )
+    modo.add_argument(
+        "--analise",
+        action="store_true",
+        help="estatística e outliers das medições gravadas",
+    )
+    parser.add_argument(
+        "--estacao", metavar="CODIGO", help="código da estação (padrão: todas)"
+    )
+    parser.add_argument(
+        "--inicio",
+        type=date.fromisoformat,
+        metavar="AAAA-MM-DD",
+        help="sozinha, analisa só esse dia",
+    )
     parser.add_argument("--fim", type=date.fromisoformat, metavar="AAAA-MM-DD")
     argumentos = parser.parse_args(argv)
 
-    if not argumentos.analise and (argumentos.estacao or argumentos.inicio or argumentos.fim):
+    if not argumentos.analise and (
+        argumentos.estacao or argumentos.inicio or argumentos.fim
+    ):
         parser.error("--estacao, --inicio e --fim só valem com --analise")
     if argumentos.fim and not argumentos.inicio:
         parser.error("--fim exige --inicio")
@@ -199,6 +226,7 @@ def etapa_da_execucao(argumentos: argparse.Namespace) -> str:
 
 if __name__ == "__main__":
     argumentos = ler_argumentos(sys.argv[1:])
+    # Extracao_Dados("test").execute()
     try:
         settings = iniciar_aplicacao(etapa_da_execucao(argumentos))
         if argumentos.ingestao:
