@@ -240,3 +240,46 @@ def test_rota_ingestao_nao_expoe_detalhes_da_excecao(client, monkeypatch):
     assert response.status_code == 500
     assert "RuntimeError" in response.json["mensagem"]
     assert "sensivel" not in response.get_data(as_text=True)
+
+
+# --- Página "Testar API do BI" ------------------------------------------------
+
+
+def test_pagina_api_bi_renderiza_servidor_e_situacao_da_chave(client, monkeypatch):
+    monkeypatch.setenv("FONTE_DADOS", "http://api-bi:8000")
+    monkeypatch.setenv("CHAVE_API_BI", "segredo-bi")
+
+    html = client.get("/api-bi").get_data(as_text=True)
+
+    assert "Testar API do BI" in html and "http://api-bi:8000" in html
+    assert "configurada" in html and "segredo-bi" not in html
+
+
+def test_dashboard_tem_link_para_a_pagina_da_api_bi(client):
+    assert 'href="/api-bi"' in client.get("/").get_data(as_text=True)
+
+
+def test_consulta_api_bi_repassa_rota_e_argumentos(client, monkeypatch):
+    chamadas = []
+
+    def consultar(rota, args):
+        chamadas.append((rota, args.get("inicio")))
+        return {"ok": True, "rota": rota}
+
+    monkeypatch.setattr(dashboard_module.api_bi, "consultar", consultar)
+
+    resposta = client.get("/api-bi/consulta?rota=medicoes&inicio=2026-06-01")
+
+    assert resposta.status_code == 200 and resposta.get_json()["ok"]
+    assert chamadas == [("medicoes", "2026-06-01")]
+
+
+def test_consulta_api_bi_rota_invalida_responde_400(client):
+    resposta = client.get("/api-bi/consulta?rota=data-set")
+    assert resposta.status_code == 400
+    assert "Rota desconhecida" in resposta.get_json()["mensagem"]
+
+
+def test_status_api_bi_devolve_a_situacao_geral(client, monkeypatch):
+    monkeypatch.setattr(dashboard_module.api_bi, "status", lambda: {"api": {"online": True}, "gold_disponivel": False})
+    assert client.get("/api-bi/status").get_json() == {"api": {"online": True}, "gold_disponivel": False}

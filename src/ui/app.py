@@ -17,6 +17,7 @@ from src.config import load_config
 from src.database.connection import DatabaseConnection
 from src.repository.leitura_repository import LeituraRepository
 from src.services.analytics_service import AnaliticsService
+from src.ui import api_bi
 from src.ui.visualizacao import (
     FILTROS_TEMPLATE,
     OPCOES_POR_PAGINA,
@@ -251,6 +252,30 @@ def create_app() -> Flask:
                 "ok": False,
                 "mensagem": f"Ingestão não concluída ({type(error).__name__}). Consulte os logs.",
             }), 500
+
+    @application.get("/api-bi")
+    def pagina_api_bi():
+        """Página para testar as rotas da API do Power BI (camada Gold)."""
+        return render_template(
+            "api_bi.html",
+            url_base=api_bi.url_base(),
+            chave_configurada=api_bi.chave_configurada(),
+            rotas=api_bi.ROTAS_BI,
+            rotas_com_filtro=api_bi.ROTAS_COM_FILTRO,
+        )
+
+    @application.get("/api-bi/consulta")
+    def consultar_api_bi():
+        """Chama uma rota do BI e devolve status, tempo e uma amostra das linhas."""
+        try:
+            return jsonify(api_bi.consultar(request.args.get("rota", ""), request.args))
+        except ValueError as error:
+            return jsonify({"ok": False, "mensagem": str(error)}), 400
+
+    @application.get("/api-bi/status")
+    def status_api_bi():
+        """API no ar, status de cada rota do BI e se a camada Gold tem dados."""
+        return jsonify(api_bi.status())
 
     return application
 

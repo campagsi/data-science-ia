@@ -367,6 +367,7 @@ Rotas principais:
 ```text
 GET http://127.0.0.1:8000/health
 GET http://127.0.0.1:8000/api/v1/data-set
+GET http://127.0.0.1:8000/api/v1/bi/...   (secao 12)
 ```
 
 A documentacao interativa do FastAPI fica disponivel em:
@@ -406,3 +407,35 @@ somente por esta API, que precisa estar em execucao durante o pipeline.
 - **Versionamento de rota:** o prefixo `/api/v1` permite evoluir o contrato
   sem quebrar imediatamente os consumidores existentes.
 - **Contrato explicito:** o endpoint declara o formato da lista retornada.
+
+## 12. Rotas do Power BI (camada Gold)
+
+Além do dataset de ingestão, a API expõe a camada Gold do Data Lake para o
+Power BI, com a mesma separação em camadas:
+
+```text
+Power BI
+    |
+    v
+BiController      (prefixo /api/v1/bi, chave X-API-Key opcional)
+    |
+    v
+BiService         (filtros, paginação e agregado diário)
+    |
+    v
+GoldRepository    (leitura dos Parquet com cache por arquivo)
+    |
+    v
+data_lake/gold/*.parquet
+```
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `gold_repository.py` | Lê `estacoes`, `parametros`, `tempo` e `medicoes` em Parquet; mantém cada tabela em memória e a relê quando a data de modificação ou o tamanho do arquivo muda. Arquivo ausente ou inválido gera `GoldIndisponivelError`. |
+| `bi_service.py` | Converte as tabelas em JSON (datas ISO, nulos como `null`), filtra a fato (`FiltroMedicoes`), pagina em ordem cronológica e agrega por dia, estação e parâmetro. |
+| `bi_controller.py` | Registra as rotas, valida os parâmetros (`422`), confere `X-API-Key` quando `CHAVE_API_BI` está definida (`401`) e converte `GoldIndisponivelError` em `503`. |
+
+A pasta lida vem de `DIRETORIO_GOLD` (padrão `data_lake/gold`). A API não
+gera nem altera a Gold. Rotas, filtros e as consultas Power Query de exemplo
+estão na seção 5 de `docs/manual-execucao.md`. Testes em
+`tests/unit/test_api_bi.py`.

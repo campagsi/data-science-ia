@@ -41,6 +41,7 @@ flowchart LR
 | Serviços | `src/services/` | Normalizar, descobrir parâmetros, validar regras de qualidade, calcular métricas e formatar relatórios. |
 | Domínio e persistência | `src/models/`, `src/repository/`, `src/database/`, `sql/` | Representar entidades e gravar o modelo relacional em transação. O schema é administrado por SQL. |
 | Interface | `src/cli/`, `main.py` | Iniciar ingestão, gerar análise e oferecer consultas interativas. |
+| Consumo analítico | `src/api/bi_controller.py`, `src/api/bi_service.py`, `src/api/gold_repository.py` | Expor ao Power BI, por HTTP, as tabelas Parquet da camada Gold (dimensões e fato de medições). |
 
 ### Arquitetura-alvo do projeto final
 
@@ -199,6 +200,8 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 | `CHAVE_CRIPTOGRAFIA` | Sim | Chave Fernet para proteção reversível do e-mail. |
 | `CHAVE_HASH` | Não | Segredo para HMAC-SHA256 de CPF e nome; vazio usa SHA-256 puro. |
 | `PASTA_LOGS` | Não | Sobrescreve a pasta de logs; usado também em testes. |
+| `CHAVE_API_BI` | Não | Exige o header `X-API-Key` nas rotas `/api/v1/bi`; vazia deixa as rotas abertas (uso local). |
+| `DIRETORIO_GOLD` | Não | Pasta dos Parquet da camada Gold lidos pela API do BI; padrão `data_lake/gold`. |
 
 Não configure `DB_HOST`, `DB_PORT`, `DB_USER` ou `DB_PASSWORD`: o código atual não os lê.
 
@@ -243,6 +246,8 @@ Invoke-RestMethod http://127.0.0.1:8000/api/v1/data-set | Select-Object -First 1
 
 Para uma API remota, não é necessário iniciar o servidor local; a URL em `FONTE_DADOS` deve apontar ao endpoint disponível.
 
+O mesmo servidor expõe a camada Gold para o Power BI em `/api/v1/bi` (dimensões estação, parâmetro e tempo; fato de medições paginada; agregado diário). Rotas, filtros e a consulta Power Query de exemplo estão na seção 5 de [docs/manual-execucao.md](docs/manual-execucao.md).
+
 ### 3. Abrir o dashboard Flask
 
 Com a API de dados rodando no terminal anterior, inicie a interface Flask em outro terminal:
@@ -251,7 +256,7 @@ Com a API de dados rodando no terminal anterior, inicie a interface Flask em out
 python -m flask --app src.ui.app run --host 127.0.0.1 --port 5000
 ```
 
-Abra `http://127.0.0.1:5000`. O dashboard permite executar a ingestão e explorar as medições por estação, parâmetro e período, com gráfico navegável por semana, mês e ano, tabelas paginadas e exportação do recorte filtrado em CSV. A visualização consulta somente dados analíticos do banco. Detalhes na seção 6 de `docs/manual-execucao.md`.
+Abra `http://127.0.0.1:5000`. O dashboard permite executar a ingestão e explorar as medições por estação, parâmetro e período, com gráfico navegável por semana, mês e ano, tabelas paginadas e exportação do recorte filtrado em CSV. A visualização consulta somente dados analíticos do banco. A página `/api-bi` ("Testar API do BI") verifica as rotas do Power BI e mostra uma amostra da resposta. Detalhes na seção 6 de `docs/manual-execucao.md`.
 
 ### 4. Executar a ingestão
 
@@ -331,7 +336,7 @@ Data-Science-Ia/
 ├── docs/                   # requisitos, arquitetura, runbook, contratos e diagramas
 ├── logs/                   # logs de execução e rejeitados; fora do Git
 ├── src/
-│   ├── api/                # API FastAPI para disponibilizar o dataset
+│   ├── api/                # API FastAPI: dataset de ingestão e camada Gold para o Power BI
 │   ├── cli/                # consulta interativa e exportação
 │   ├── database/           # conexão e transações com Azure SQL
 │   ├── ingestion/          # cliente HTTP e importação relacional

@@ -260,6 +260,25 @@ a.page-link:hover { border-color: var(--green); color: var(--green-dark); }
 
 .page-footer { padding: 22px 0 8px; color: var(--faint); font-size: 10px; }
 
+/* Página "Testar API do BI" */
+.rail-link { display: inline-block; margin-top: 4px; }
+.bi-config { margin: 0 0 18px; font-size: 12px; }
+.bi-config dt { margin-top: 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.bi-config dd { margin: 2px 0 0; color: var(--ink-soft); overflow-wrap: anywhere; }
+.bi-filtros { margin: 0; padding: 0; border: 0; min-width: 0; }
+.bi-filtros[hidden], #bi-paginacao[hidden] { display: none; }
+.bi-check { display: flex; align-items: center; gap: 8px; }
+.filter-form .bi-check input { width: auto; min-height: 0; }
+.bi-url { margin: 0 0 4px; font-size: 12px; overflow-wrap: anywhere; }
+.bi-url code { color: var(--ink-soft); }
+.bi-tag { padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; }
+.bi-tag-ok { background: var(--green-wash); color: var(--green-dark); }
+.bi-tag-erro { background: var(--coral-wash); color: var(--coral); }
+.metric-ok { border-top-color: var(--green); }
+.metric-ok strong { color: var(--green-dark); }
+#bi-orientacao code { overflow-wrap: anywhere; }
+#bi-check-linhas td:last-child { white-space: normal; min-width: 220px; }
+
 @media (max-width: 1180px) {
   .pc-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pc-kpi:nth-child(4) { border-left: 0; }

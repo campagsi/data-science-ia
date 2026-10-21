@@ -142,6 +142,63 @@ python -m uvicorn src.api.app:app --reload
 
 O endpoint de verificacao fica em `GET /health`.
 
+### API para o Power BI (camada Gold)
+
+O mesmo servidor expõe, em `/api/v1/bi`, as tabelas Parquet da camada Gold (`data_lake/gold/`, ou a pasta definida em `DIRETORIO_GOLD`). A API só lê os arquivos: a Gold continua sendo gerada pelo pipeline. Cada tabela fica em memória e é relida automaticamente quando o arquivo muda no disco. Se a Gold ainda não existir, as rotas respondem `503`.
+
+| Rota | Conteúdo |
+|---|---|
+| `GET /api/v1/bi/estacoes` | Dimensão estação (`estacao_sk`, código, nome, município, latitude, longitude). |
+| `GET /api/v1/bi/parametros` | Dimensão parâmetro (`parametro_sk`, código, campo, unidade). |
+| `GET /api/v1/bi/tempo` | Dimensão tempo (`tempo_sk` no formato AAAAMMDD, data, ano, mês, dia, trimestre, dia da semana, dia útil). |
+| `GET /api/v1/bi/medicoes` | Fato medições, paginada, em ordem cronológica: `{pagina, por_pagina, total, total_paginas, tem_proxima, dados}`. |
+| `GET /api/v1/bi/medicoes/diarias` | Fato agregada por dia, estação e parâmetro: quantidade, média, mínimo, máximo e outliers. |
+
+Filtros de `/medicoes` e `/medicoes/diarias` (todos opcionais): `inicio` e `fim` (`AAAA-MM-DD`, inclusivos), `estacao_sk`, `parametro_sk` e `apenas_outliers=true`. Em `/medicoes`, `pagina` (a partir de 1) e `por_pagina` (padrão 5000, máximo 50000). Parâmetro inválido ou `inicio` maior que `fim` responde `422`.
+
+**Chave de acesso:** com `CHAVE_API_BI` preenchida no `.env`, toda chamada a `/api/v1/bi` precisa do header `X-API-Key` com o mesmo valor; sem ele, a resposta é `401`. Com a variável vazia, as rotas ficam abertas (uso local).
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/bi/medicoes?inicio=2026-06-01&fim=2026-06-30&por_pagina=10" -Headers @{ "X-API-Key" = "<chave>" }
+```
+
+**No Power BI:** em *Obter dados → Consulta em branco → Editor avançado*, as dimensões e o agregado diário são uma chamada só (troque a rota). Use autenticação *Anônima* e passe a chave pelo header:
+
+```powerquery
+let
+    Base = "http://127.0.0.1:8000",
+    Fonte = Json.Document(Web.Contents(Base, [RelativePath = "api/v1/bi/estacoes", Headers = [#"X-API-Key" = "<chave>"]])),
+    Tabela = Table.FromRecords(Fonte)
+in
+    Tabela
+```
+
+A fato de medições é paginada; esta consulta percorre todas as páginas:
+
+```powerquery
+let
+    Base = "http://127.0.0.1:8000",
+    Pagina = (n as number) => Json.Document(Web.Contents(Base, [
+        RelativePath = "api/v1/bi/medicoes",
+        Query = [pagina = Number.ToText(n), por_pagina = "50000"],
+        Headers = [#"X-API-Key" = "<chave>"]
+    ])),
+    Primeira = Pagina(1),
+    Paginas = List.Generate(
+        () => [n = 1, r = Primeira],
+        each [n] <= Primeira[total_paginas],
+        each [n = [n] + 1, r = Pagina([n] + 1)],
+        each [r][dados]
+    ),
+    Tabela = Table.FromRecords(List.Combine(Paginas))
+in
+    Tabela
+```
+
+No modelo, relacione a fato às dimensões por `estacao_sk`, `parametro_sk` e `tempo_sk`. `RelativePath` e `Query` mantêm a URL base fixa, o que permite agendar a atualização no serviço do Power BI; para isso, a API precisa estar acessível pela rede ou por um gateway.
+
+**Teste pelo dashboard:** a página `http://127.0.0.1:5000/api-bi` (link "Testar API do BI" no menu lateral do dashboard, seção 6) mostra, ao abrir, se a API está no ar, se a camada Gold tem dados (com a orientação do que fazer quando estiver vazia), quantas rotas respondem e o total de medições, além do status, tempo e total de linhas de cada rota; com a Gold disponível, já exibe uma amostra das medições. Também executa uma consulta com os filtros acima, mostrando a URL chamada, o total, a paginação e uma amostra das primeiras 20 linhas. O Flask chama a API do lado do servidor no endereço de `FONTE_DADOS`, enviando `CHAVE_API_BI` quando configurada; a chave não é enviada ao navegador.
+
 ## 6. Executar a aplicação
 
 ### Interface gráfica (dashboard web)
@@ -158,7 +215,8 @@ Abra <http://127.0.0.1:5000> no navegador. O dashboard permite:
 - ver a série temporal por **semana, mês, ano ou tudo**, navegando entre períodos (botões ‹ › ou setas do teclado), com média, faixa mín.–máx., anomalias marcadas, comparação com o período anterior e o perfil médio por hora do dia. Clicar em um ponto abre o mês ou a semana correspondente. A "escala ajustada" impede que picos isolados achatem a série; "Escala completa" mostra o eixo inteiro;
 - navegar pelas tabelas de resumo estatístico, alertas e medições **paginadas** (10, 25, 50 ou 100 linhas por página);
 - exportar **todo** o recorte filtrado em CSV (separador `;`, decimal com vírgula), não só a página exibida;
-- alternar entre tema claro e escuro.
+- alternar entre tema claro e escuro;
+- testar a API do Power BI em **Testar API do BI** (`/api-bi`): status da API e da camada Gold, verificação de todas as rotas e consulta com filtros e amostra da resposta (detalhes na seção 5). Requer a API da seção 5 rodando.
 
 As medições ficam em memória por até 2 minutos (ou até a próxima ingestão pelo dashboard), então a troca de página e de período não repete a consulta ao banco. O gráfico consome `GET /api/serie?codigo=<parâmetro>` com os mesmos filtros da página, que devolve baldes horários já agregados.
 

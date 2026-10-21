@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API do BI | Dados Ambientais</title>
+  <script>
+    try { const tema = localStorage.getItem("da-tema"); if (tema) document.documentElement.dataset.theme = tema; } catch (erro) {}
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='api-bi.js') }}" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="control-rail">
+      <div class="rail-top">
+        <a class="wordmark" href="/" aria-label="Dados Ambientais, início">
+          <span class="wordmark-mark" aria-hidden="true">DA</span>
+          <span>Dados<br>Ambientais</span>
+        </a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Alternar tema claro ou escuro" title="Alternar tema">
+          <span class="theme-icon" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <section class="rail-section" aria-labelledby="config-title">
+        <p class="eyebrow">Integração</p>
+        <h2 id="config-title">API do Power BI</h2>
+        <p class="muted">Consulta as rotas <code>/api/v1/bi</code>, que leem a camada Gold do Data Lake.</p>
+        <dl class="bi-config">
+          <dt>Servidor</dt><dd><code>{{ url_base }}</code></dd>
+          <dt>Chave (X-API-Key)</dt><dd>{% if chave_configurada %}configurada{% else %}não configurada · rotas abertas{% endif %}</dd>
+        </dl>
+        <button class="button button-primary" id="bi-check" type="button">
+          <span class="button-icon" aria-hidden="true">↻</span> Atualizar status
+        </button>
+      </section>
+
+      <form class="filter-form" id="bi-form">
+        <div class="section-rule"></div>
+        <p class="eyebrow">Consulta</p>
+        <h2>Testar uma rota</h2>
+        <label for="bi-rota">Rota</label>
+        <select id="bi-rota" name="rota">
+          {% for rota, descricao in rotas.items() %}
+          <option value="{{ rota }}" {% if rota in rotas_com_filtro %}data-filtros{% endif %} {% if rota == "medicoes" %}selected{% endif %}>{{ descricao }} · /{{ rota }}</option>
+          {% endfor %}
+        </select>
+        <fieldset class="bi-filtros" id="bi-filtros">
+          <div class="date-pair">
+            <div><label for="bi-inicio">Data inicial</label><input id="bi-inicio" type="date" name="inicio"></div>
+            <div><label for="bi-fim">Data final</label><input id="bi-fim" type="date" name="fim"></div>
+          </div>
+          <div class="date-pair">
+            <div><label for="bi-estacao">estacao_sk</label><input id="bi-estacao" type="number" min="1" name="estacao_sk"></div>
+            <div><label for="bi-parametro">parametro_sk</label><input id="bi-parametro" type="number" min="1" name="parametro_sk"></div>
+          </div>
+          <div class="date-pair" id="bi-paginacao">
+            <div><label for="bi-pagina">Página</label><input id="bi-pagina" type="number" min="1" name="pagina" value="1"></div>
+            <div><label for="bi-por-pagina">Por página</label><input id="bi-por-pagina" type="number" min="1" max="50000" name="por_pagina" value="20"></div>
+          </div>
+          <label class="bi-check"><input type="checkbox" name="apenas_outliers" value="true"> Somente outliers</label>
+        </fieldset>
+        <button class="button button-secondary" type="submit">Executar consulta</button>
+        <a class="clear-filters" href="/">← Voltar ao dashboard</a>
+      </form>
+
+      <div class="rail-footnote">Camada Gold · Parquet</div>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Monitoramento ambiental <span class="eyebrow-dot">/</span> Integração</p>
+          <h1>Testar API do BI</h1>
+          <p class="muted">Confira se cada rota responde e veja o que o Power BI vai receber. A chave de acesso fica no servidor e não é enviada ao navegador.</p>
+        </div>
+      </header>
+
+      <section class="metrics-grid" aria-label="Situação da API do BI" aria-live="polite">
+        <article class="metric" id="bi-card-api"><span class="metric-label">API</span><strong id="bi-api">…</strong><span class="metric-note" id="bi-api-nota">verificando {{ url_base }}</span></article>
+        <article class="metric" id="bi-card-gold"><span class="metric-label">Camada Gold</span><strong id="bi-gold">…</strong><span class="metric-note" id="bi-gold-nota">data_lake/gold</span></article>
+        <article class="metric" id="bi-card-rotas"><span class="metric-label">Rotas respondendo</span><strong id="bi-rotas">…</strong><span class="metric-note">de {{ rotas | length }} rotas /api/v1/bi</span></article>
+        <article class="metric"><span class="metric-label">Medições na Gold</span><strong id="bi-medicoes">…</strong><span class="metric-note">linhas da fato</span></article>
+      </section>
+
+      <div class="notice" id="bi-orientacao" hidden></div>
+      <div class="notice notice-error" id="bi-erro" role="alert" hidden></div>
+
+      <section class="analysis-section" id="bi-verificacao" aria-labelledby="check-title" hidden>
+        <div class="section-heading">
+          <div><p class="eyebrow">Disponibilidade</p><h2 id="check-title">Verificação das rotas</h2></div>
+          <span class="record-count" id="bi-check-resumo"></span>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Rota</th><th>Conteúdo</th><th>Status</th><th class="num">Tempo</th><th class="num">Linhas</th><th>Detalhe</th></tr></thead>
+          <tbody id="bi-check-linhas"></tbody>
+        </table></div>
+      </section>
+
+      <section class="analysis-section" id="bi-resultado" aria-labelledby="result-title" hidden>
+        <div class="section-heading">
+          <div><p class="eyebrow">Resposta</p><h2 id="result-title">Resultado da consulta</h2></div>
+          <span class="record-count" id="bi-status"></span>
+        </div>
+        <p class="bi-url"><code id="bi-url"></code> <button class="text-button" type="button" id="bi-copiar">Copiar URL</button></p>
+        <section class="metrics-grid" aria-label="Indicadores da resposta">
+          <article class="metric"><span class="metric-label">Total no recorte</span><strong id="bi-total">—</strong><span class="metric-note">linhas na API</span></article>
+          <article class="metric"><span class="metric-label">Nesta resposta</span><strong id="bi-linhas">—</strong><span class="metric-note" id="bi-pagina-info">linhas recebidas</span></article>
+          <article class="metric"><span class="metric-label">Colunas</span><strong id="bi-colunas">—</strong><span class="metric-note">campos por linha</span></article>
+          <article class="metric"><span class="metric-label">Tempo</span><strong id="bi-tempo">—</strong><span class="metric-note">ida e volta</span></article>
+        </section>
+        <div class="table-scroll"><table id="bi-amostra"></table></div>
+        <p class="table-note" id="bi-amostra-nota"></p>
+      </section>
+
+      <footer class="page-footer">A API lê os Parquet de data_lake/gold · Documentação na seção 5 de docs/manual-execucao.md</footer>
+    </main>
+  </div>
+</body>
+</html>

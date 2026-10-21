@@ -6,7 +6,9 @@ fastapi
 uvicorn
 requests
 pandas
+pyarrow
 pytest
+httpx2
 pytest-cov
 cryptography
 rich
