@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agente analítico | Dados Ambientais</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <!-- POL-09: nenhum script embutido; a Content-Security-Policy só aceita arquivos do próprio site. -->
+  <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='agente.js') }}" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="control-rail">
+      <div class="rail-top">
+        <a class="wordmark" href="/" aria-label="Dados Ambientais, início">
+          <span class="wordmark-mark" aria-hidden="true">DA</span>
+          <span>Dados<br>Ambientais</span>
+        </a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Alternar tema claro ou escuro" title="Alternar tema">
+          <span class="theme-icon" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <section class="rail-section" aria-labelledby="agente-titulo">
+        <p class="eyebrow">Assistente</p>
+        <h2 id="agente-titulo">Agente analítico</h2>
+        <p class="muted">Pergunte sobre as medições, as anomalias e as regras do projeto. Os números vêm de ferramentas só de leitura, e cada resposta mostra as fontes.</p>
+        <button class="text-button rail-link" id="agente-nova" type="button">Nova conversa</button>
+      </section>
+
+      {% if chave_exigida %}
+      <section class="rail-section" aria-labelledby="agente-chave-titulo">
+        <p class="eyebrow">Acesso</p>
+        <h2 id="agente-chave-titulo">Chave de acesso</h2>
+        <label for="agente-chave">X-API-Key</label>
+        <input id="agente-chave" type="password" autocomplete="off">
+      </section>
+      {% endif %}
+
+      <section class="rail-section">
+        <a class="text-button rail-link" href="/">← Voltar ao dashboard</a>
+      </section>
+    </aside>
+
+    <main class="main-content agente-conteudo">
+      <section class="agente-conversa" id="agente-conversa" aria-live="polite" aria-label="Conversa com o agente">
+        <p class="muted agente-vazio" id="agente-vazio">Exemplos: "Qual foi o pH médio em junho de 2026?", "A temperatura do dia é diferente da noite?", "Por que a chuva gera tantos alertas IQR?"</p>
+      </section>
+      <form class="agente-form" id="agente-form">
+        <label class="visually-hidden" for="agente-pergunta">Pergunta</label>
+        <textarea id="agente-pergunta" maxlength="1000" rows="3" placeholder="Digite a sua pergunta (até 1.000 caracteres)" required></textarea>
+        <div class="agente-acoes">
+          <span class="muted" id="agente-estado" role="status"></span>
+          <button class="button button-primary" id="agente-enviar" type="submit">Perguntar</button>
+        </div>
+      </form>
+    </main>
+  </div>
+</body>
+</html>

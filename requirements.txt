@@ -12,3 +12,13 @@ httpx2
 pytest-cov
 cryptography
 rich
+tiktoken
+anthropic
+fastembed
+chromadb
+scipy
+Flask-Limiter
+markdown-it-py
+scikit-learn
+joblib
+openai

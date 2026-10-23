@@ -1,13 +1,13 @@
 import argparse
 import sys
-from datetime import date
+import time
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from src.cli.console_app import Console_APP
 from src.config import Settings, load_config
 from src.database.connection import DatabaseConnection
 from src.ingestion.data_client import DataClient
-from src.ingestion.extracao_dados import Extracao_Dados
 from src.logger import (
     configurar_logs,
     logger,
@@ -51,6 +51,11 @@ def run_pipeline() -> dict[str, int]:
         resumo = dict.fromkeys(_CAMPOS_RESUMO, 0)
         registrar_resumo(**resumo)
         return resumo
+
+    # Por quê: importado aqui, e não no topo. O módulo chama a API de ingestão
+    # já na importação; no topo, nenhum outro modo do main.py (análise, agente)
+    # funcionaria com a API parada.
+    from src.ingestion.extracao_dados import Extracao_Dados
 
     # Realiza a extração dos dados para camada Bronze, salvando o arquivo em JSON
     extracao_dados = Extracao_Dados(
@@ -180,8 +185,136 @@ def _exibir_resultados(resultados: dict[str, Any]) -> None:
         logger.info(f"Relatório da execução:\n{texto}")
 
 
+def iniciar_agente():
+    """
+    Prepara o log (etapa "agente") e monta o agente analítico a partir do .env.
+
+    Não exige as variáveis da ingestão: o agente tem configuração própria
+    (load_config_agente) e lê o banco com o usuário só de leitura.
+    """
+    configurar_logs("agente")
+    # Por quê: import aqui para os outros modos não carregarem o SDK do LLM.
+    from src.agente import criar_agente
+
+    agente = criar_agente()
+    logger.info("Agente analítico configurado.")
+    return agente
+
+
+def indexar_documentacao():
+    """
+    Atualiza o índice da documentação do agente (python main.py --indexar).
+
+    Idempotente: sem mudança nos documentos, a segunda execução registra
+    inseridos=0 removidos=0. Na primeira vez, baixa o modelo de embeddings
+    (~0,22 GB) para data/agente/modelos.
+    """
+    configurar_logs("indexacao")
+    # Por quê: import aqui para os outros modos não carregarem o onnxruntime.
+    from src.agente.rag.embeddings import EmbedderFastembed
+    from src.agente.rag.indexador import indexar
+    from src.config import load_config_indice
+
+    cfg = load_config_indice()
+    return indexar(EmbedderFastembed(cfg.embeddings_modelo, cfg.dir_indice / "modelos"), cfg.dir_indice, vetores=cfg.vetores)
+
+
+def indexar_dias():
+    """
+    Atualiza o índice dos resumos diários do agente (python main.py --indexar-dias, Fase 9).
+
+    Lê todas as medições com o usuário só de leitura (AGENTE_SQL_CONNECTIONSTRING),
+    gera um resumo por estação e dia e sincroniza o índice em AGENTE_DIR_INDICE/dias.
+    Idempotente como o --indexar: só os dias cujo resumo mudou são vetorizados.
+    """
+    configurar_logs("indexacao")
+    # Por quê: import aqui para os outros modos não carregarem o onnxruntime.
+    from src.agente.dias.indice import indexar_dias as sincronizar_dias
+    from src.agente.ferramentas.consulta_dados import ConsultaDados, FiltroMedicoes
+    from src.agente.rag.embeddings import EmbedderFastembed
+    from src.config import load_config_indice
+
+    cfg = load_config_indice()
+    if not cfg.sql_connectionstring:
+        raise ValueError("A variável AGENTE_SQL_CONNECTIONSTRING deve estar configurada para o --indexar-dias.")
+    medicoes = ConsultaDados.do_banco(DatabaseConnection(cfg.sql_connectionstring)).medicoes(FiltroMedicoes())
+    return sincronizar_dias(medicoes, EmbedderFastembed(cfg.embeddings_modelo, cfg.dir_indice / "modelos"), cfg.dir_indice, cfg.vetores)
+
+
+def treinar_previsao():
+    """
+    Treina e avalia o modelo de previsão (python main.py --treinar-previsao, Fase 10).
+
+    Lê as medições com o usuário só de leitura (AGENTE_SQL_CONNECTIONSTRING),
+    avalia cada parâmetro × horizonte com TimeSeriesSplit contra os dois baselines,
+    grava o modelo e o metadados.json em AGENTE_DIR_INDICE/modelos/previsao e o
+    relatório em relatorios/.
+
+    Returns:
+        Caminho do relatório.
+    """
+    configurar_logs("previsao")
+    from src.agente.fabrica import pasta_do_modelo_de_previsao
+    from src.agente.ferramentas.consulta_dados import ConsultaDados, FiltroMedicoes
+    from src.config import RAIZ_PROJETO, load_config_indice
+    from src.previsao.dados import PARAMETROS_ALVO
+    from src.previsao.persistencia import salvar_modelo
+    from src.previsao.relatorio import montar_relatorio_treino
+    from src.previsao.treino import treinar
+
+    cfg = load_config_indice()
+    if not cfg.sql_connectionstring:
+        raise ValueError("A variável AGENTE_SQL_CONNECTIONSTRING deve estar configurada para o --treinar-previsao.")
+    consulta = ConsultaDados.do_banco(DatabaseConnection(cfg.sql_connectionstring))
+    inicio = time.monotonic()
+    avaliacoes = treinar(consulta.medicoes(FiltroMedicoes(parametros=PARAMETROS_ALVO)))
+    salvar_modelo(avaliacoes, pasta_do_modelo_de_previsao(cfg.dir_indice))
+    relatorio = RAIZ_PROJETO / "relatorios" / f"previsao_{datetime.now():%Y%m%d_%H%M%S}.md"
+    relatorio.parent.mkdir(parents=True, exist_ok=True)
+    relatorio.write_text(montar_relatorio_treino(avaliacoes), encoding="utf-8")
+    aprovados = sum(a.aprovado for a in avaliacoes)
+    logger.info(f"Treino da previsão: combinacoes={len(avaliacoes)} aprovadas={aprovados} ms={int((time.monotonic() - inicio) * 1000)} relatorio={relatorio}")
+    return relatorio
+
+
+LIMITE_LAUDOS = 50
+
+
+def gerar_laudos_de_anomalias(estacao: str | None, inicio: date, fim: date | None, limite: int | None):
+    """
+    Laudos das anomalias do período com o LLM (python main.py --laudo, Fase 11).
+
+    Uma chamada ao LLM por anomalia (as mais extremas primeiro, até o limite),
+    resposta validada pelo contrato LaudoAnomalia, e o CSV e o Markdown em
+    relatorios/, sinalizados como gerados por IA. Não altera o banco.
+
+    Returns:
+        Caminho do relatório Markdown.
+    """
+    configurar_logs("laudo")
+    # Por quê: import aqui para os outros modos não carregarem o SDK do LLM.
+    from src.agente.ferramentas.consulta_dados import ConsultaDados, FiltroMedicoes
+    from src.agente.laudo.contexto import anomalias_com_contexto
+    from src.agente.laudo.gerador import exportar_laudos, gerar_laudos
+    from src.agente.fabrica import llm_da_config
+    from src.config import FORNECEDORES_REAIS, RAIZ_PROJETO, load_config_agente
+
+    cfg = load_config_agente()
+    if cfg.llm_fornecedor not in FORNECEDORES_REAIS:
+        raise ValueError("O --laudo usa o LLM real: configure AGENTE_LLM_FORNECEDOR=anthropic ou openai.")
+    fim = fim or inicio
+    consulta = ConsultaDados.do_banco(DatabaseConnection(cfg.sql_connectionstring))
+    periodo = consulta.medicoes(FiltroMedicoes(estacao=estacao, data_inicio=inicio, data_fim=fim))
+    # Por quê: um dia de margem para os vizinhos de 2 h das anomalias nas bordas do período.
+    margem = consulta.medicoes(FiltroMedicoes(estacao=estacao, data_inicio=inicio - timedelta(days=1), data_fim=fim + timedelta(days=1)))
+    resultados = gerar_laudos(llm_da_config(cfg), anomalias_com_contexto(periodo, margem), LIMITE_LAUDOS if limite is None else limite)
+    caminho_csv, caminho_md = exportar_laudos(resultados, RAIZ_PROJETO / "relatorios", f"laudos_{inicio}_{fim}", cfg.llm_modelo)
+    logger.info(f"Laudos: csv={caminho_csv} relatorio={caminho_md}")
+    return caminho_md
+
+
 def ler_argumentos(argv: list[str]) -> argparse.Namespace:
-    """Sem argumentos abre a CLI; --ingestao carrega o banco; --analise gera o relatório."""
+    """Sem argumentos abre a CLI; --ingestao carrega o banco; --analise gera o relatório; --agente e --pergunta usam o agente."""
     parser = argparse.ArgumentParser(description="Pipeline de dados ambientais")
     modo = parser.add_mutually_exclusive_group()
     modo.add_argument(
@@ -191,6 +324,24 @@ def ler_argumentos(argv: list[str]) -> argparse.Namespace:
         "--analise",
         action="store_true",
         help="estatística e outliers das medições gravadas",
+    )
+    modo.add_argument(
+        "--agente", action="store_true", help="chat com o agente analítico (LLM + ferramentas)"
+    )
+    modo.add_argument(
+        "--pergunta", metavar="TEXTO", help="uma pergunta ao agente analítico, com a resposta no terminal"
+    )
+    modo.add_argument(
+        "--indexar", action="store_true", help="atualiza o índice da documentação usado pelo agente (RAG)"
+    )
+    modo.add_argument(
+        "--indexar-dias", action="store_true", help="atualiza o índice dos resumos diários (ferramenta dias_semelhantes)"
+    )
+    modo.add_argument(
+        "--treinar-previsao", action="store_true", help="treina e avalia o modelo de previsão (ferramenta prever)"
+    )
+    modo.add_argument(
+        "--laudo", action="store_true", help="laudos das anomalias do período com o LLM (exige --inicio)"
     )
     parser.add_argument(
         "--estacao", metavar="CODIGO", help="código da estação (padrão: todas)"
@@ -202,12 +353,19 @@ def ler_argumentos(argv: list[str]) -> argparse.Namespace:
         help="sozinha, analisa só esse dia",
     )
     parser.add_argument("--fim", type=date.fromisoformat, metavar="AAAA-MM-DD")
+    parser.add_argument(
+        "--limite", type=int, metavar="N", help=f"máximo de laudos (as anomalias mais extremas primeiro; padrão {LIMITE_LAUDOS}, 0 = todas)"
+    )
     argumentos = parser.parse_args(argv)
 
-    if not argumentos.analise and (
+    if not (argumentos.analise or argumentos.laudo) and (
         argumentos.estacao or argumentos.inicio or argumentos.fim
     ):
-        parser.error("--estacao, --inicio e --fim só valem com --analise")
+        parser.error("--estacao, --inicio e --fim só valem com --analise ou --laudo")
+    if argumentos.laudo and not argumentos.inicio:
+        parser.error("--laudo exige --inicio")
+    if argumentos.limite is not None and (not argumentos.laudo or argumentos.limite < 0):
+        parser.error("--limite só vale com --laudo e não pode ser negativo")
     if argumentos.fim and not argumentos.inicio:
         parser.error("--fim exige --inicio")
     if argumentos.inicio and argumentos.fim and argumentos.inicio > argumentos.fim:
@@ -221,6 +379,14 @@ def etapa_da_execucao(argumentos: argparse.Namespace) -> str:
         return "ingestao"
     if argumentos.analise:
         return "analise"
+    if argumentos.agente or argumentos.pergunta:
+        return "agente"
+    if argumentos.indexar or argumentos.indexar_dias:
+        return "indexacao"
+    if argumentos.treinar_previsao:
+        return "previsao"
+    if argumentos.laudo:
+        return "laudo"
     return "consulta"
 
 
@@ -228,6 +394,27 @@ if __name__ == "__main__":
     argumentos = ler_argumentos(sys.argv[1:])
     # Extracao_Dados("test").execute()
     try:
+        if argumentos.indexar:
+            indexar_documentacao()
+            raise SystemExit(0)
+        if argumentos.indexar_dias:
+            indexar_dias()
+            raise SystemExit(0)
+        if argumentos.treinar_previsao:
+            treinar_previsao()
+            raise SystemExit(0)
+        if argumentos.laudo:
+            gerar_laudos_de_anomalias(argumentos.estacao, argumentos.inicio, argumentos.fim, argumentos.limite)
+            raise SystemExit(0)
+        if argumentos.agente or argumentos.pergunta:
+            from src.cli.agente_cli import conversar, responder_uma
+
+            agente = iniciar_agente()
+            if argumentos.pergunta:
+                responder_uma(agente, argumentos.pergunta)
+            else:
+                conversar(agente)
+            raise SystemExit(0)
         settings = iniciar_aplicacao(etapa_da_execucao(argumentos))
         if argumentos.ingestao:
             run_pipeline()
@@ -241,6 +428,8 @@ if __name__ == "__main__":
         else:
             console_app = Console_APP()
             console_app.run()
+    except SystemExit:
+        raise
     except Exception as erro:
         logger.critical(f"{type(erro).__name__}: {erro}")
         raise SystemExit(1) from erro

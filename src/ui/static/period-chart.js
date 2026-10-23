@@ -88,6 +88,23 @@
     return `${fmtDayShort.format(start)} de ${start.getUTCFullYear()} – ${fmtDayShort.format(add(end, "dia", -1))} de ${add(end, "dia", -1).getUTCFullYear()}`;
   }
 
+  // "19 a 25/10", "28/09 a 04/10" ou "29/12/2025 a 04/01/2026" (end exclusivo).
+  function shortRange(start, end) {
+    const last = add(end, "dia", -1);
+    if (start.getUTCFullYear() !== last.getUTCFullYear()) {
+      return `${fmtDay.format(start)}/${start.getUTCFullYear()} a ${fmtDay.format(last)}/${last.getUTCFullYear()}`;
+    }
+    if (start.getUTCMonth() === last.getUTCMonth()) {
+      return `${String(start.getUTCDate()).padStart(2, "0")} a ${fmtDay.format(last)}`;
+    }
+    return `${fmtDay.format(start)} a ${fmtDay.format(last)}`;
+  }
+
+  // "Seg., 20/10"
+  function dayLabel(date) {
+    return `${capitalize(fmtWeekday.format(date))}, ${fmtDay.format(date)}`;
+  }
+
   function cssVar(name, fallback) {
     const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return value || fallback;
@@ -125,6 +142,7 @@
         resolution: saved.resolution || null,
         fullScale: Boolean(saved.fullScale),
         anchor: null,
+        compareDay: null, // dia clicado na visão Semana, comparado com a média no perfil por hora
       };
       this.cache = new Map();
       this.data = null;
@@ -208,10 +226,14 @@
       const chartWrap = el("div", { class: "pc-chart" }, [this.canvas, this.status]);
 
       this.profileCanvas = el("canvas", { role: "img", "aria-label": "Média por hora do dia no período" });
-      this.profileTitle = el("p", { class: "pc-sub-title", text: "Perfil por hora do dia" });
+      this.profileTitle = el("p", { class: "pc-sub-title", "aria-live": "polite", text: "Perfil médio por hora" });
+      this.profileNote = el("p", { class: "pc-sub-note" });
+      this.profileReset = el("button", { type: "button", class: "pc-latest", text: "Voltar à média" });
+      this.profileReset.hidden = true;
+      this.profileReset.addEventListener("click", () => this.compareWith(null));
       const profile = el("div", { class: "pc-profile" }, [
-        this.profileTitle,
-        el("p", { class: "pc-sub-note", text: "Média de cada hora no período exibido: revela o ciclo diário do parâmetro." }),
+        el("div", { class: "pc-profile-head" }, [this.profileTitle, this.profileReset]),
+        this.profileNote,
         el("div", { class: "pc-profile-chart" }, [this.profileCanvas]),
       ]);
 
@@ -286,6 +308,12 @@
       this.root.scrollIntoView({ behavior: "smooth", block: "start" });
       if (code && code !== this.state.parameter) this.setParameter(code);
       else this.render();
+    }
+
+    // Compara um dia (início do dia, UTC) com a média da semana no perfil por hora; null = só a média.
+    compareWith(day) {
+      this.state.compareDay = day;
+      this.render();
     }
 
     setView(view) {
@@ -365,8 +393,10 @@
       let count = 0; let sum = 0; let min = Infinity; let max = -Infinity;
       let minTime = null; let maxTime = null;
       const hours = Array.from({ length: 24 }, () => ({ count: 0, sum: 0 }));
+      const days = new Set();
       for (const point of this.data.points) {
         if (point.time < start || point.time >= end) continue;
+        if (point.count) days.add(startOf(point.time, "dia").getTime());
         count += point.count;
         sum += point.sum;
         if (point.min < min) { min = point.min; minTime = point.time; }
@@ -376,7 +406,7 @@
         hour.sum += point.sum;
       }
       const anomalies = this.data.anomalies.filter((anomaly) => anomaly.time >= start && anomaly.time < end).length;
-      return { count, mean: count ? sum / count : null, min, max, minTime, maxTime, anomalies, hours };
+      return { count, mean: count ? sum / count : null, min, max, minTime, maxTime, anomalies, hours, days: days.size };
     }
 
     /*
@@ -454,6 +484,10 @@
       this.setStatus("");
       const { start, end } = range;
       const unit = VIEWS[this.state.view].unit;
+      // A comparação só vale para um dia da semana exibida.
+      const compare = this.state.compareDay;
+      if (compare && (this.state.view !== "semana" || compare < start || compare >= end)) this.state.compareDay = null;
+      this.range = range;
       this.periodTitle.textContent = periodLabel(this.state.view, start, end);
       this.prevButton.disabled = !unit || !this.hasDataBetween(add(start, unit, -1), start);
       this.nextButton.disabled = !unit || !this.hasDataBetween(end, add(end, unit, 1));
@@ -469,9 +503,13 @@
       this.updateTable(buckets, resolution);
 
       const drill = DRILL_DOWN[this.state.view];
-      this.hint.textContent = drill && resolution !== "hora"
-        ? `Clique em um ponto para abrir ${drill === "mes" ? "o mês" : "a semana"}. Use ← → para navegar.`
-        : unit ? "Use ← → para navegar entre períodos." : "";
+      if (this.state.view === "semana") {
+        this.hint.textContent = "Clique em um ponto para comparar o dia com a média da semana no perfil por hora. Use ← → para navegar.";
+      } else {
+        this.hint.textContent = drill && resolution !== "hora"
+          ? `Clique em um ponto para abrir ${drill === "mes" ? "o mês" : "a semana"}. Use ← → para navegar.`
+          : unit ? "Use ← → para navegar entre períodos." : "";
+      }
     }
 
     updateKpis(summary, previous) {
@@ -547,7 +585,8 @@
             interaction: { mode: "index", intersect: false },
             onClick: (event, elements) => this.drillDown(elements),
             onHover: (event, elements) => {
-              const clickable = DRILL_DOWN[this.state.view] && elements.length && this.resolution() !== "hora";
+              const clickable = elements.length && (this.state.view === "semana"
+                || (DRILL_DOWN[this.state.view] && this.resolution() !== "hora"));
               event.native.target.style.cursor = clickable ? "pointer" : "default";
             },
             plugins: {
@@ -632,42 +671,81 @@
         : "Escala ajustada à variação típica";
     }
 
+    /*
+     * Perfil por hora: barras com a média de cada hora no período exibido. Com um dia
+     * escolhido (clique na visão Semana), a linha mostra as horas desse dia por cima da
+     * média, para ver se ele fugiu do padrão.
+     */
     updateProfile(summary, colors, unit) {
-      const hours = summary ? summary.hours : [];
-      const means = hours.map((hour) => (hour.count ? hour.sum / hour.count : null));
+      const hourlyMeans = (hours) => hours.map((hour) => (hour.count ? hour.sum / hour.count : null));
+      const means = hourlyMeans(summary ? summary.hours : []);
       const valid = means.filter((value) => value !== null);
       const peak = valid.length ? Math.max(...valid) : null;
       const labels = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}h`);
       const background = means.map((value) => (value !== null && value === peak ? colors.barHighlight : colors.bar));
+      const unitText = unit ? ` ${unit}` : "";
+
+      const range = summary ? this.range : null;
+      const day = range ? this.state.compareDay : null;
+      const dayMeans = day ? hourlyMeans(this.summarize(day, add(day, "dia", 1)).hours) : null;
+      const rangeText = range ? shortRange(range.start, range.end) : "";
+      this.profileComparison = day ? { day: dayLabel(day), average: `Média de ${rangeText}` } : null;
+
+      const datasets = [
+        { type: "bar", label: "Média", data: means, backgroundColor: background, borderRadius: 4, borderSkipped: "start",
+          categoryPercentage: 0.86, barPercentage: 0.92, order: 2 },
+      ];
+      if (dayMeans) {
+        datasets.push({ type: "line", label: "Dia", data: dayMeans, borderColor: colors.anomaly, backgroundColor: colors.anomaly,
+          borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, pointBorderColor: colors.surface, pointBorderWidth: 1.5,
+          tension: 0.25, spanGaps: false, order: 1 });
+      }
+
       if (!this.profileChart) {
         this.profileChart = new global.Chart(this.profileCanvas, {
           type: "bar",
-          data: { labels, datasets: [{ label: "Média", data: means, backgroundColor: background, borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.86, barPercentage: 0.92 }] },
+          data: { labels, datasets },
           options: {
             maintainAspectRatio: false,
             animation: { duration: 250 },
+            interaction: { mode: "index", intersect: false },
             plugins: {
               legend: { display: false },
-              tooltip: { callbacks: { label: (context) => `Média: ${fmtNumber.format(context.raw)}${this.data && this.data.unidade ? ` ${this.data.unidade}` : ""}` } },
+              tooltip: { callbacks: { label: (context) => {
+                const comparison = this.profileComparison;
+                const name = comparison ? (context.dataset.label === "Dia" ? comparison.day : comparison.average) : "Média";
+                if (context.raw === null) return `${name}: sem medições`;
+                return `${name}: ${fmtNumber.format(context.raw)}${this.data && this.data.unidade ? ` ${this.data.unidade}` : ""}`;
+              } } },
             },
             scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } }, y: {} },
           },
         });
       } else {
-        this.profileChart.data.datasets[0].data = means;
-        this.profileChart.data.datasets[0].backgroundColor = background;
+        this.profileChart.data.datasets = datasets;
       }
       const options = this.profileChart.options;
       options.scales.x.ticks.color = colors.text;
       options.scales.x.border = { color: colors.grid };
       // Barras partem do zero só quando o parâmetro admite zero; senão a variação diária some.
-      options.scales.y.beginAtZero = valid.length > 0 && Math.min(...valid) >= 0 && Math.min(...valid) < peak * 0.25;
+      const all = valid.concat((dayMeans || []).filter((value) => value !== null));
+      options.scales.y.beginAtZero = all.length > 0 && Math.min(...all) >= 0 && Math.min(...all) < Math.max(...all) * 0.25;
       options.scales.y.ticks = { color: colors.text, maxTicksLimit: 5, callback: (value) => fmtNumber.format(value) };
       options.scales.y.grid = { color: colors.grid };
       options.scales.y.border = { display: false };
-      this.profileTitle.textContent = peak !== null
-        ? `Perfil por hora do dia · pico às ${labels[means.indexOf(peak)]} (${fmtNumber.format(peak)}${unit ? ` ${unit}` : ""})`
-        : "Perfil por hora do dia";
+
+      const peakText = peak !== null ? `Pico médio às ${labels[means.indexOf(peak)]} (${fmtNumber.format(peak)}${unitText}).` : "";
+      if (day) {
+        this.profileTitle.textContent = `${dayLabel(day)} × média de ${rangeText}`;
+        this.profileNote.textContent = `Barras: média de cada hora de ${rangeText}. Linha: as horas de ${dayLabel(day)}. ${peakText}`;
+        this.profileCanvas.setAttribute("aria-label", `Horas de ${dayLabel(day)} comparadas com a média de cada hora de ${rangeText}`);
+      } else {
+        const daysText = summary && summary.days ? ` (${fmtInteger.format(summary.days)} ${summary.days === 1 ? "dia" : "dias"})` : "";
+        this.profileTitle.textContent = range ? `Perfil médio por hora · ${rangeText}${daysText}` : "Perfil médio por hora";
+        this.profileNote.textContent = `Média de cada hora no período exibido: revela o ciclo diário do parâmetro. ${peakText}`.trim();
+        this.profileCanvas.setAttribute("aria-label", `Média por hora do dia de ${rangeText}`);
+      }
+      this.profileReset.hidden = !day;
       this.profileChart.update();
     }
 
@@ -683,10 +761,16 @@
     }
 
     drillDown(elements) {
-      const target = DRILL_DOWN[this.state.view];
-      if (!target || !elements.length || this.resolution() === "hora") return;
+      if (!elements.length) return;
       const bucket = this.buckets[elements[0].index];
       if (!bucket || !bucket.count) return;
+      // Na semana não há visão menor: o clique compara o dia com a média da semana.
+      if (this.state.view === "semana") {
+        this.compareWith(startOf(bucket.start, "dia"));
+        return;
+      }
+      const target = DRILL_DOWN[this.state.view];
+      if (!target || this.resolution() === "hora") return;
       this.state.view = target;
       this.state.resolution = null;
       this.state.anchor = startOf(bucket.start, VIEWS[target].unit);

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Leituras das estações | Dados Ambientais</title>
+  <title>{% if estacao_atual %}Leituras da estação {{ estacao_atual[1] }}{% else %}Leituras das estações{% endif %} | Dados Ambientais</title>
   <script>
     try { const tema = localStorage.getItem("da-tema"); if (tema) document.documentElement.dataset.theme = tema; } catch (erro) {}
   </script>
@@ -56,6 +56,13 @@
         <div class="ingest-summary" id="ingest-summary" hidden></div>
       </section>
 
+      <section class="rail-section" aria-labelledby="agente-link-title">
+        <p class="eyebrow">Assistente</p>
+        <h2 id="agente-link-title">Agente analítico</h2>
+        <p class="muted">Pergunte em linguagem natural sobre as medições e as regras do projeto.</p>
+        <a class="text-button rail-link" href="/agente">Abrir o agente →</a>
+      </section>
+
       <section class="rail-section" aria-labelledby="bi-link-title">
         <p class="eyebrow">Integração</p>
         <h2 id="bi-link-title">API do Power BI</h2>
@@ -67,11 +74,27 @@
         <div class="section-rule"></div>
         <p class="eyebrow">Exploração</p>
         <h2>Filtrar leituras</h2>
+        {% if estados %}
+        <label for="state-filter">Estado</label>
+        <select id="state-filter" name="estado" data-location-filter>
+          <option value="">Todos os estados</option>
+          {% for uf, state_name in estados %}
+          <option value="{{ uf }}" {% if uf == estado_selecionado %}selected{% endif %}>{{ uf }} · {{ state_name }}</option>
+          {% endfor %}
+        </select>
+        <label for="city-filter">Cidade</label>
+        <select id="city-filter" name="municipio" data-location-filter>
+          <option value="">Todas as cidades</option>
+          {% for city_id, city_name, uf in municipios %}
+          <option value="{{ city_id }}" data-uf="{{ uf }}" {% if city_id == municipio_selecionado %}selected{% endif %}>{{ city_name }} ({{ uf }})</option>
+          {% endfor %}
+        </select>
+        {% endif %}
         <label for="station-filter">Estação</label>
         <select id="station-filter" name="estacao">
           <option value="">Todas as estações</option>
-          {% for station_id, code, name in estacoes %}
-          <option value="{{ station_id }}" {% if station_id == estacao_selecionada %}selected{% endif %}>{{ code }} · {{ name }}</option>
+          {% for station_id, code, name, city_id, uf in estacoes %}
+          <option value="{{ station_id }}" data-uf="{{ uf }}" data-municipio="{{ city_id }}" {% if station_id == estacao_selecionada %}selected{% endif %}>{{ code }} · {{ name }}</option>
           {% endfor %}
         </select>
         <label for="parameter-filter">Parâmetro</label>
@@ -109,14 +132,18 @@
       <header class="page-header">
         <div>
           <p class="eyebrow">Monitoramento ambiental <span class="eyebrow-dot">/</span> Data Science</p>
-          <h1>Leituras das estações</h1>
+          <h1>{% if estacao_atual %}Leituras da estação{% else %}Leituras das estações{% endif %}</h1>
+          <p class="station-name">{% if estacao_atual %}{{ estacao_atual[1] }} · {{ estacao_atual[2] }}{% else %}Todas as estações{% endif %}</p>
+          {% if local_atual %}<p class="station-place">Cidade: {{ local_atual.municipio or "todas" }} <span class="eyebrow-dot">·</span> Estado: {{ local_atual.estado }} ({{ local_atual.uf }})</p>{% endif %}
           <p class="muted">
             {% if periodo %}Recorte de {{ periodo[0] | data_br }} a {{ periodo[1] | data_br }}.{% else %}Acompanhe medições e sinais de qualidade dos dados.{% endif %}
           </p>
         </div>
-        {% if estacao_selecionada or parametro_selecionado or inicio or fim %}
+        {% if estado_selecionado or municipio_selecionado or estacao_selecionada or parametro_selecionado or inicio or fim %}
         <div class="active-filters" aria-label="Filtros ativos">
-          {% for station_id, code, name in estacoes if station_id == estacao_selecionada %}<span class="chip">{{ code }}</span>{% endfor %}
+          {% if estado_atual %}<span class="chip">{{ estado_atual[0] }}</span>{% endif %}
+          {% if municipio_atual %}<span class="chip">{{ municipio_atual[1] }}</span>{% endif %}
+          {% if estacao_atual %}<span class="chip">{{ estacao_atual[1] }} · {{ estacao_atual[2] }}</span>{% endif %}
           {% for code, name, unit in parametros if code == parametro_selecionado %}<span class="chip">{{ name }}</span>{% endfor %}
           {% if inicio or fim %}<span class="chip">{{ (inicio | data_br) if inicio else "…" }} → {{ (fim | data_br) if fim else "…" }}</span>{% endif %}
         </div>

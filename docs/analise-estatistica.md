@@ -73,8 +73,10 @@ Na CLI, a opção `0` grava `estatisticas.csv` e `anomalias.csv` (separador `;`)
 
 Conferido em `tests/test_quality_stat.py` (sem banco) e em `tests/integration/test_analytics.py` (banco de teste, comparando o serviço com `queries_analiticas.sql`):
 
-- 9.806 leituras e 104.582 medições de 1 estação, 11 parâmetros;
-- **1.824 anomalias**: 1.528 `IQR` e 296 `IQR+ZSCORE`; nenhuma só por Z-Score;
-- por parâmetro: precipitação 1.210, condutividade 101, turbidez 92, oxigênio dissolvido 76, pressão 75, pH 73, temperatura do ar 71, umidade 53, temperatura da água 47, vento 26, radiação solar 0.
+- O payload tem 59.378 registros em 6 estações (duas cidades por estado em BA, RJ e SP), com duas leituras por hora e 12 operadores (dois por estação).
+- Após a validação, são importadas 59.296 leituras e 630.212 medições válidas em 11 parâmetros.
+- Há 16.075 medições nulas e 5.953 valores fora das faixas físicas entre as leituras válidas; esses itens são descartados antes da análise estatística.
+- 5.938 registros do payload bruto (≈ 10%) têm pelo menos uma medição fora da faixa. Essa proporção de qualidade física não é a mesma métrica que os alertas `IQR`/`ZSCORE`.
+- A análise gera 66 grupos (estação + parâmetro). As contagens de alertas são recalculadas por recorte, e os testes verificam a coerência entre Python e SQL sem fixar os números do conjunto anterior.
 
-**Limitação da regra IQR na precipitação:** a maior parte das leituras é 0 mm, então Q1 = Q3 = 0 e IQR = 0. Com isso, toda chuva acima de zero sai como `IQR` (1.210 dos 1.824 alertas). Na radiação solar, que também tem muitos zeros (noite), o IQR é largo (≈438 W/m²) e nada é sinalizado. Decisão D12 (06/10/2026): a regra é mantida igual para todos os parâmetros. Na leitura dos alertas de precipitação, `IQR` sem `ZSCORE` indica só que choveu, não um valor suspeito.
+**Limitação da regra IQR na precipitação:** a maior parte das leituras é 0 mm; no conjunto atual, Q1 = Q3 = 0 e IQR = 0 nas seis estações. Com isso, chuva acima de zero pode ser sinalizada como `IQR` sem representar um valor suspeito. Decisão D12 (06/10/2026): a regra é mantida igual para todos os parâmetros. O indicador `IQR` na precipitação precisa ser interpretado no contexto e não como diagnóstico de falha do sensor.

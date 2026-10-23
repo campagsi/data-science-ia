@@ -1,0 +1,141 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Agente 2/2 — RAG, guardrails e avaliação",
+  "description": "Como o agente busca na documentação (RAG), as políticas de segurança POL-01 a POL-13 aplicadas em código, a interface web e a medição da qualidade com o golden set.",
+  "steps": [
+    {
+      "title": "RAG: o que é",
+      "description": "## RAG = *Retrieval-Augmented Generation*\n\nEm português, \"geração aumentada por recuperação\": antes de responder, o agente **busca trechos relevantes da documentação** e entrega esses trechos ao LLM, que explica **com base neles**.\n\nÉ como uma prova com consulta: em vez de responder \"de memória\" (e arriscar inventar), o LLM consulta o material do projeto.\n\n**Exemplo:** *\"Por que a chuva gera tantos alertas IQR?\"* A resposta está em `docs/analise-estatistica.md`, e não no conhecimento geral do modelo.\n\nO RAG tem duas fases:\n\n```text\nINDEXAÇÃO (uma vez: python main.py --indexar)\n  docs/*.md → chunks → embeddings → banco vetorial\n\nCONSULTA (a cada pergunta)\n  consulta → embedding → busca dos mais parecidos → trechos → LLM\n```"
+    },
+    {
+      "file": "src/agente/rag/chunker.py",
+      "selection": {
+        "start": { "line": 4, "character": 1 },
+        "end": { "line": 27, "character": 1 }
+      },
+      "title": "Chunking: dividir os documentos",
+      "description": "## Por que dividir?\n\nUm documento de 30 KB fala de muitos assuntos. Buscar o documento inteiro traria muito texto irrelevante. O ideal é um **trecho** (*chunk*) sobre **um assunto só**.\n\nA divisão tem duas etapas:\n\n1. **Pelos títulos** (`#`, `##`, `###`), guardando o caminho da seção. Exemplo: `analise-estatistica.md > Anomalias`.\n2. **Recursiva**, para seções grandes: corta entre parágrafos, depois entre linhas, frases e palavras, até caber em **500 caracteres**.\n\n- **Sobreposição de 75 caracteres:** o fim de um trecho se repete no começo do próximo, para uma ideia cortada no meio aparecer inteira em pelo menos um deles.\n- **Cabeçalho contextual:** cada trecho começa com \"Documento\" e \"Seção\", e assim carrega o assunto junto.\n\nCom trechos de 500 caracteres, o acerto da busca subiu de 0,77 para 0,92 no experimento da Fase 8."
+    },
+    {
+      "file": "src/agente/rag/indexador.py",
+      "selection": {
+        "start": { "line": 190, "character": 1 },
+        "end": { "line": 205, "character": 1 }
+      },
+      "title": "Indexação idempotente",
+      "description": "## Rodar duas vezes = rodar uma\n\n**Idempotente** quer dizer que repetir a operação não muda o resultado. É a mesma ideia da carga das leituras no pipeline.\n\nO truque é o **id de cada trecho**: `sha256(modelo + arquivo + seção + texto)`. O **hash** é uma \"impressão digital\" do texto, que muda se mudar uma letra.\n\n- trecho igual → mesmo id → é mantido, sem recalcular;\n- trecho alterado → id novo → o antigo sai e o novo entra;\n- modelo trocado → todos os ids mudam → reindexação completa.\n\nSó os trechos **novos** passam pelo embedding, que é a parte cara.\n\nO corpus é uma **allowlist**: README e `docs/`. Os TODOs, logs, `sql/` e `.env` ficam de fora."
+    },
+    {
+      "file": "src/agente/rag/embeddings.py",
+      "selection": {
+        "start": { "line": 172, "character": 1 },
+        "end": { "line": 191, "character": 1 }
+      },
+      "title": "Embeddings: o texto vira um vetor",
+      "description": "## Significado em números\n\nUm **embedding** transforma um texto numa lista de números (aqui, **384 números**). Textos com **significado parecido** viram vetores **próximos**, mesmo com palavras diferentes:\n\n```text\n\"acidez da água\"      ●──● \"pH\"         (perto)\n\"velocidade do vento\" ●                  (longe)\n```\n\nO modelo é o `paraphrase-multilingual-MiniLM-L12-v2`:\n\n- **multilíngue:** funciona bem em português;\n- **local:** roda na máquina com o `fastembed`, sem chamar API e **sem custo**;\n- é baixado uma vez para `data/agente/modelos/`.\n\nO modelo só carrega no **primeiro uso** (*lazy loading*), para não pesar nos outros modos do `main.py`."
+    },
+    {
+      "file": "src/agente/rag/vector_store.py",
+      "selection": {
+        "start": { "line": 181, "character": 1 },
+        "end": { "line": 189, "character": 1 }
+      },
+      "title": "Banco vetorial: a busca",
+      "description": "## A busca é uma multiplicação de matrizes\n\nO banco vetorial guarda os vetores dos trechos. Para buscar:\n\n1. a consulta vira um vetor;\n2. calcula-se a **similaridade de cosseno** com todos os trechos. Com vetores normalizados, ela é só o **produto escalar** (o operador `@`);\n3. os `top_k` maiores são devolvidos.\n\nA similaridade vai de -1 a 1, e quanto mais perto de 1, mais parecido.\n\nHá duas implementações com a **mesma interface** `VectorStore`:\n\n- `memoria`: NumPy + arquivo `.npz`, simples (o padrão);\n- `chroma`: **ChromaDB**, um banco vetorial de verdade (`AGENTE_VETORES=chroma`)."
+    },
+    {
+      "file": "src/agente/rag/recuperador.py",
+      "selection": {
+        "start": { "line": 70, "character": 1 },
+        "end": { "line": 92, "character": 1 }
+      },
+      "title": "Recuperador: limiar e deduplicação",
+      "description": "## Melhor nada do que lixo\n\n- **Limiar de 0,35:** um trecho abaixo dele é descartado. Se ninguém passa, a resposta é \"a documentação não cobre isso\", o que é melhor do que usar um trecho irrelevante como fonte.\n- **Um trecho por seção:** trechos vizinhos se sobrepõem, e mandar os dois gastaria tokens com texto repetido. Por isso a busca pede o **dobro** de candidatos.\n\nO limiar foi **calibrado**: 0,35 é o menor valor em que nenhuma pergunta fora do escopo (\"capital da França\") traz trecho.\n\nVeja na prática, com os scores:\n\n>> .venv\\Scripts\\python.exe -m src.agente.exemplos.e04_busca_vetorial\n\nRepare que *\"receita de bolo de chocolate\"* não traz nenhum trecho."
+    },
+    {
+      "file": "src/agente/ferramentas/documentacao.py",
+      "selection": {
+        "start": { "line": 81, "character": 1 },
+        "end": { "line": 107, "character": 1 }
+      },
+      "title": "O RAG vira uma ferramenta",
+      "description": "## O LLM decide quando buscar\n\nO RAG não roda em toda pergunta: ele é a ferramenta **`buscar_documentacao`**. O LLM a chama quando precisa explicar uma regra ou um conceito, e pode **reformular** a consulta com termos técnicos:\n\n> \"Por que chove tanto alerta?\" → `buscar_documentacao(\"limitação IQR precipitação\")`\n\nCada trecho volta com `arquivo` e `secao`, e a resposta cita a fonte.\n\n**POL-08, \"dados externos não são ordens\":** os trechos entram como **resultado de ferramenta**, nunca no system prompt. Se um documento tiver \"ignore as regras\", o LLM trata isso como texto, e não como instrução (*prompt injection* indireto)."
+    },
+    {
+      "file": "src/agente/guardrails/politicas.py",
+      "selection": {
+        "start": { "line": 19, "character": 1 },
+        "end": { "line": 33, "character": 1 }
+      },
+      "title": "Política × guardrail",
+      "description": "## Regra e mecanismo\n\n- **Política** é a **regra**: \"o agente não revela dado pessoal\" (POL-02).\n- **Guardrail** é o **mecanismo** que faz a regra valer: a máscara de CPF e o usuário do banco sem acesso a `Operadores`.\n\nSão 13 políticas, detalhadas em `docs/agente/guardrails-e-owasp.md` § 9, que as relaciona ao **OWASP Top 10 para LLM**, a lista dos riscos mais comuns em aplicações com LLM.\n\nToda vez que um guardrail age, `registrar_acionamento` grava uma linha de log com o id da política (**POL-13, rastreabilidade**):\n\n```text\n[WARNING] Agente: guardrail=POL-03 conversa=c-3f9a acao=correcao numeros=1\n```\n\nO id é conferido: registrar `POL-99` dá erro."
+    },
+    {
+      "file": "src/agente/guardrails/entrada.py",
+      "selection": {
+        "start": { "line": 51, "character": 1 },
+        "end": { "line": 83, "character": 1 }
+      },
+      "title": "Guardrail de entrada (POL-05 e POL-02)",
+      "description": "## Antes de qualquer coisa\n\nA pergunta passa por três filtros **antes** do LLM, do histórico e do log:\n\n1. **Caracteres de controle** (bytes invisíveis) são removidos, porque podem esconder instruções ou quebrar o log.\n2. **Tamanho:** de 1 a 1.000 caracteres. Uma pergunta gigante só gastaria tokens.\n3. **Dados pessoais:** CPF, e-mail e telefone viram `[CPF]`, `[EMAIL]` e `[TELEFONE]`, pelo `src/security.py`.\n\n```text\n\"Qual o pH?\\x00 Meu CPF é 529.982.247-25\"\n→ \"Qual o pH?  Meu CPF é [CPF]\"\n```\n\nÉ um guardrail **forte**: é código, e o LLM não tem como contorná-lo. Nenhum dado pessoal sai para o provedor (LGPD)."
+    },
+    {
+      "file": "src/agente/guardrails/orcamento.py",
+      "selection": {
+        "start": { "line": 73, "character": 1 },
+        "end": { "line": 94, "character": 1 }
+      },
+      "title": "O orçamento de cada pergunta (POL-07)",
+      "description": "## Um freio para o laço\n\nSem limite, um LLM confuso poderia pedir ferramentas para sempre, e cada volta custa dinheiro. O orçamento acaba quando acontece uma destas três coisas:\n\n| Limite | Padrão | Variável |\n|---|---|---|\n| chamadas de ferramenta | 6 | `AGENTE_MAX_FERRAMENTAS` |\n| tokens de entrada acumulados | 60.000 | `AGENTE_MAX_TOKENS_PERGUNTA` |\n| tempo total | 180 s | `AGENTE_PRAZO_PERGUNTA_SEGUNDOS` |\n\nQuando acaba, o LLM é chamado **mais uma vez, sem poder usar ferramentas**, para responder com o que já tem. É a chamada \"resposta forçada\".\n\nNo OWASP, esse risco se chama **LLM10, consumo sem limite** (*Unbounded Consumption*)."
+    },
+    {
+      "file": "src/agente/guardrails/saida.py",
+      "selection": {
+        "start": { "line": 147, "character": 1 },
+        "end": { "line": 184, "character": 1 }
+      },
+      "title": "A conferência dos números (POL-03)",
+      "description": "## Caçando alucinação numérica\n\nO LLM prevê o próximo token. Sem o número real, ele completa com um número **plausível**. Esta função confere a resposta:\n\n1. extrai os números no formato brasileiro (`7,38` e `1.402`);\n2. ignora datas, horas, códigos (`EST-RJ-001`) e itens de lista;\n3. procura cada número nos resultados das ferramentas, com **tolerância de arredondamento** (`7,38` confere com `7.381`);\n4. aceita porcentagens: `12,5%` confere com `0.125`.\n\n```python\nnumeros_sem_origem(\"pH médio 7,38 em 1.402 medições; 2% acima de maio.\", [resultado])\n# ['2']  ← o \"2%\" não veio de nenhuma ferramenta\n```\n\nÉ uma **heurística** (regra prática, não infalível). Por isso a ação é leve: pedir correção uma vez e depois avisar."
+    },
+    {
+      "file": "sql/seguranca/agente_usuario_leitura.sql",
+      "selection": {
+        "start": { "line": 23, "character": 1 },
+        "end": { "line": 42, "character": 1 }
+      },
+      "title": "Defesa em profundidade: o banco",
+      "description": "## Mesmo que o código erre, o banco protege\n\nO agente conecta com um usuário próprio, o **`agente_leitura`**, que tem só o mínimo necessário (**menor privilégio**):\n\n- `GRANT SELECT` só nas tabelas que as ferramentas usam;\n- `DENY SELECT ON Operadores`: a tabela com CPF e e-mail fica **inacessível** (POL-02);\n- `DENY INSERT, UPDATE, DELETE, ALTER`: o agente **não escreve nada** (POL-01).\n\nNo SQL Server, `DENY` sempre vence `GRANT`.\n\nIsso é **defesa em profundidade**: várias camadas independentes. Mesmo se um bug no Python tentasse apagar dados, o banco recusaria."
+    },
+    {
+      "file": "src/agente/exemplos/e11_guardrails.py",
+      "selection": {
+        "start": { "line": 44, "character": 1 },
+        "end": { "line": 68, "character": 1 }
+      },
+      "title": "Demonstração: os guardrails em ação",
+      "description": "## Cada guardrail sendo acionado\n\nCom o LLM roteirizado, este exemplo **provoca** cada situação:\n\n| Política | Situação | Resultado |\n|---|---|---|\n| POL-05 | pergunta com 1.001 caracteres | recusada antes do LLM |\n| POL-02 | CPF na pergunta | mascarado |\n| POL-07 | LLM pedindo ferramentas sem parar | resposta forçada |\n| POL-03 | número inventado (`6,1`) | correção, depois aviso ⚠ |\n| POL-11 | recusa do modelo | mensagem padrão |\n| POL-10 | queda do provedor | mensagem amigável |\n\n>> .venv\\Scripts\\python.exe -m src.agente.exemplos.e11_guardrails\n\nRepare nas linhas **`[WARNING] ... guardrail=POL-xx`** no console."
+    },
+    {
+      "file": "src/ui/agente.py",
+      "selection": {
+        "start": { "line": 86, "character": 1 },
+        "end": { "line": 120, "character": 1 }
+      },
+      "title": "A interface web",
+      "description": "## `POST /agente/perguntar`\n\nA página `/agente` do dashboard Flask chama o **mesmo** `agente.perguntar()` da CLI, com mais algumas camadas:\n\n- **chave de acesso** no header `X-API-Key` (401 se estiver errada);\n- **limite por IP:** 10 perguntas por minuto e 200 por dia (429), POL-07;\n- **validação do JSON** (400);\n- **provedor fora do ar** (503).\n\n`markdown_seguro` converte o Markdown da resposta em HTML **com o HTML bruto desligado**, e a página manda o cabeçalho **CSP** (*Content Security Policy*). Isso impede o **XSS** (*Cross-Site Scripting*): se o LLM fosse induzido a escrever `<script>...`, o navegador não executaria (POL-09)."
+    },
+    {
+      "file": "src/agente/avaliacao/relatorio.py",
+      "selection": {
+        "start": { "line": 59, "character": 1 },
+        "end": { "line": 73, "character": 1 }
+      },
+      "title": "Avaliação: o agente é bom?",
+      "description": "## Medir em vez de achar\n\nO **golden set** (`tests/agente/golden_set.json`) tem **52 perguntas de referência**, cada uma com a resposta esperada: qual ferramenta, quais argumentos, quais números e quais trechos.\n\n| Métrica | Pergunta que responde |\n|---|---|\n| precisão / recall da seleção | escolheu as ferramentas certas? |\n| fidelidade numérica | os números batem com o cálculo? |\n| hit@4 | o trecho certo veio entre os 4 primeiros da busca? |\n| MRR | em que posição ele veio? (1º = 1, 2º = 0,5...) |\n| recusa correta | recusou o que devia (CPF, fora do escopo)? |\n\nRodada real com o `gpt-4.1-mini`: recall **1,00**, fidelidade **100%**, mas hit@4 de **0,69**, abaixo da meta de 0,85. A melhoria da busca está no backlog.\n\nO relatório completo fica em `relatorios/avaliacao_agente_gpt-4.1-mini_prompt2.md`."
+    },
+    {
+      "title": "Encerramento",
+      "description": "## Recapitulando\n\n**Parte 1, o caminho da pergunta:** CLI → fábrica → laço do orquestrador → LLM (por um adaptador) → ferramentas validadas → dados com cache.\n\n**Parte 2, as proteções e o conhecimento:**\n\n- **RAG:** chunks → embeddings locais → banco vetorial → limiar → ferramenta `buscar_documentacao`;\n- **Guardrails:** entrada (máscara e tamanho), laço (orçamento), saída (números conferidos), banco (só leitura) e web (CSP e limite por IP);\n- **Avaliação:** golden set e métricas com metas.\n\n**Para se aprofundar** (em `docs/agente/`):\n\n- `arquitetura.md`: diagramas de componentes e de sequência\n- `rag.md`: o pipeline RAG completo\n- `guardrails-e-owasp.md`: as 13 políticas e o OWASP\n- `guia-estudos.md`: exemplos executáveis e exercícios por fase"
+    }
+  ]
+}

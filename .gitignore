@@ -20,3 +20,12 @@ data_lake/**
 
 # Relatórios CSV exportados pela CLI
 relatorios/
+
+# Índice vetorial local do agente (docs/agente/rag.md)
+data/agente/
+
+# Gravações de demonstração (arquivos grandes, fora do Git)
+videos/
+
+# Dataset da API: versionado só compactado (data_set.json.gz); o JSON puro passa de 100 MB
+src/api/data_set.json

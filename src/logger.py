@@ -58,6 +58,38 @@ ETAPAS = {
         "pipeline": "início da aplicação e eventuais erros; as consultas aparecem só na tela",
         "rejeitados": _SO_LEITURA,
     },
+    "agente": {
+        "execucao": "Agente analítico (python main.py --agente ou --pergunta)",
+        "objetivo": "responde perguntas em linguagem natural com um LLM e ferramentas só de leitura",
+        "pipeline": "uma linha por pergunta (com CPF, e-mail e telefone mascarados), por ferramenta "
+        "executada e por resposta (tokens e tempo), e uma linha WARNING 'guardrail=POL-xx' por "
+        "política de segurança acionada; o texto das respostas não é registrado",
+        "rejeitados": _SO_LEITURA,
+    },
+    "indexacao": {
+        "execucao": "Indexação do agente (python main.py --indexar ou --indexar-dias)",
+        "objetivo": "divide a documentação em trechos (ou gera os resumos diários), vetoriza os novos e atualiza o índice",
+        "pipeline": "a linha 'Indexação' (documentação) ou 'Indexação dos dias' com o modelo, as contagens e o tempo",
+        "rejeitados": _SO_LEITURA,
+    },
+    "previsao": {
+        "execucao": "Treino da previsão (python main.py --treinar-previsao)",
+        "objetivo": "avalia cada parâmetro e horizonte com validação temporal contra dois baselines e grava o modelo aprovado",
+        "pipeline": "a linha 'Treino da previsão' com as combinações, as aprovadas, o tempo e o caminho do relatório",
+        "rejeitados": _SO_LEITURA,
+    },
+    "laudo": {
+        "execucao": "Laudos de anomalias (python main.py --laudo)",
+        "objetivo": "classifica a causa provável de cada anomalia do período com o LLM (few-shot), valida o JSON e grava o CSV e o Markdown",
+        "pipeline": "os laudos descartados (guardrail=POL-06 ou POL-03, com o motivo) e a linha 'Laudos' com as contagens",
+        "rejeitados": _SO_LEITURA,
+    },
+    "avaliacao": {
+        "execucao": "Avaliação do agente (python -m src.agente.avaliacao)",
+        "objetivo": "faz as perguntas do golden set ao agente, mede seleção, números, recuperação e segurança e gera o relatório",
+        "pipeline": "as perguntas e os guardrails de cada caso (como na etapa agente) e a linha 'Avaliação' com o caminho do relatório",
+        "rejeitados": _SO_LEITURA,
+    },
     "coleta": {
         "execucao": "Coleta avulsa (python -m src.ingestion.importar_dados)",
         "objetivo": "só busca o lote na API para conferência, sem validar nem gravar",
@@ -275,3 +307,54 @@ def registrar_anomalias(anomalias: list[dict]) -> None:
             f'registro={anomalia["Registro"]} parametro="{anomalia["Parâmetro"]}" '
             f"data_hora={anomalia['Data']} valor={anomalia['Valor']} limites_iqr={limites} zscore={zscore}"
         )
+
+
+# --- Agente analítico (docs/agente/arquitetura.md § 12) ----------------------
+# Recebem textos JÁ mascarados por src/security.py (pergunta) e nunca o texto
+# completo da resposta nem trechos de documentos (volume e LGPD).
+
+
+def registrar_pergunta_agente(conversa_id: str, pergunta_mascarada: str) -> None:
+    """Linha INFO da pergunta recebida, já com CPF, e-mail e telefone mascarados (DA5)."""
+    logger.info(f'Agente: pergunta conversa={conversa_id} texto="{pergunta_mascarada}"')
+
+
+def registrar_chamada_ferramenta(
+    conversa_id: str, ferramenta: str, argumentos_json: str, sucesso: bool, ms: int, erro: str | None = None
+) -> None:
+    """
+    Linha da ferramenta executada: INFO no sucesso, WARNING no erro.
+
+    Os argumentos bastam para reproduzir o cálculo, por isso entram no log.
+    """
+    if sucesso:
+        logger.info(f"Agente: ferramenta={ferramenta} conversa={conversa_id} args={argumentos_json} sucesso=sim ms={ms}")
+    else:
+        logger.warning(
+            f'Agente: ferramenta={ferramenta} conversa={conversa_id} args={argumentos_json} sucesso=nao ms={ms} erro="{erro}"'
+        )
+
+
+def registrar_resposta_agente(
+    conversa_id: str, ferramentas: int, tokens_entrada: int, tokens_saida: int, ms: int
+) -> None:
+    """Linha INFO da resposta enviada: quantas ferramentas, tokens (custo) e tempo."""
+    logger.info(
+        f"Agente: resposta conversa={conversa_id} ferramentas={ferramentas} "
+        f"tokens_entrada={tokens_entrada} tokens_saida={tokens_saida} ms={ms}"
+    )
+
+
+def registrar_guardrail(politica: str, conversa_id: str, **detalhes) -> None:
+    """
+    Linha WARNING de uma política de segurança acionada (POL-13), sem dado pessoal.
+
+    Ex.: Agente: guardrail=POL-03 conversa=c-3f9a acao=correcao numeros=2
+    """
+    extras = "".join(f" {chave}={valor}" for chave, valor in detalhes.items())
+    logger.warning(f"Agente: guardrail={politica} conversa={conversa_id}{extras}")
+
+
+def registrar_falha_llm(conversa_id: str, tipo_erro: str) -> None:
+    """Linha ERROR de falha do provedor do LLM: só o tipo do erro, nunca a chave nem a mensagem (POL-10)."""
+    logger.error(f"Agente: falha no provedor de LLM conversa={conversa_id} erro={tipo_erro}")

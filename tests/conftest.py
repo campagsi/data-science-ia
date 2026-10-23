@@ -1,5 +1,4 @@
 import copy
-import json
 import logging
 import os
 import sys
@@ -27,10 +26,12 @@ _DATASET: list[dict] | None = None
 
 
 def carregar_dataset() -> list[dict]:
-    """Dataset servido pela API (src/api/data_set.json), lido uma vez por sessão."""
+    """Dataset servido pela API (src/api/data_set.json.gz), lido uma vez por sessão."""
     global _DATASET
     if _DATASET is None:
-        _DATASET = json.loads((RAIZ / "src" / "api" / "data_set.json").read_text(encoding="utf-8"))
+        from src.api.dataset_repository import DatasetRepository
+
+        _DATASET = DatasetRepository().get_all()
     return _DATASET
 
 

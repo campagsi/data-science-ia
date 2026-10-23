@@ -199,11 +199,11 @@ def test_campos_descartados_sao_informados_no_log(registro_bruto, logs_temporari
 
 
 def test_aceite_fase_4_dataset_completo(dataset):
-    """9.888 registros sem exceção, 11 parâmetros e nenhum dado pessoal em claro."""
+    """Todo o dataset normaliza sem exceção, com 11 parâmetros e sem dados pessoais em claro."""
 
     normalizados = NormalizationService().normalize(dataset)
 
-    assert len(normalizados) == len(dataset) == 9888
+    assert len(normalizados) == len(dataset)
     assert len(NormalizationService.descobrir_parametros(normalizados)) == 11
     assert all(campo not in r for r in normalizados for campo in CAMPOS_PESSOAIS)
     datas = [r["data_hora_ciclo"] for r in normalizados]

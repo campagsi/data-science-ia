@@ -113,4 +113,4 @@ A análise não grava nada no banco: o indicador de alerta fica no resultado, no
 
 ## Observação
 
-Este diagrama representa a comunicação entre os módulos da ingestão e deve ser atualizado sempre que o fluxo do código mudar.
+Este diagrama representa a comunicação entre os módulos da ingestão e deve ser atualizado sempre que o fluxo do código mudar. As sequências do agente analítico (pergunta numérica, RAG, recusa e indexação) estão em [agente/arquitetura.md](../agente/arquitetura.md) e [agente/rag.md](../agente/rag.md).

@@ -151,6 +151,8 @@ h1, h2, h3, p { margin-top: 0; }
 .eyebrow-dot { padding: 0 6px; color: var(--yellow); }
 h1 { margin-bottom: 8px; font: 500 38px Georgia, serif; letter-spacing: 0; }
 .page-header .muted { margin-bottom: 0; }
+.station-name { margin: 6px 0 4px; color: var(--ink); font-size: 17px; font-weight: 600; }
+.station-place { margin: 0 0 8px; color: var(--ink-soft); font-size: 14px; }
 .active-filters { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { padding: 5px 10px; border-radius: 999px; background: var(--green-wash); color: var(--green-dark); font-size: 11px; font-weight: 700; }
 
@@ -250,6 +252,7 @@ a.page-link:hover { border-color: var(--green); color: var(--green-dark); }
 .pc-status[hidden] { display: none; }
 .pc-status.is-error { color: var(--coral); }
 .pc-profile { margin-top: 22px; padding-top: 16px; border-top: 1px dashed var(--line); }
+.pc-profile-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .pc-sub-title { margin: 0 0 2px; color: var(--ink); font-size: 13px; font-weight: 700; }
 .pc-sub-note { margin: 0 0 8px; color: var(--faint); font-size: 11px; }
 .pc-profile-chart { position: relative; height: 160px; }
@@ -321,3 +324,19 @@ a.page-link:hover { border-color: var(--green); color: var(--green-dark); }
   .pagination { justify-content: center; }
   .page-step { display: none; }
 }
+
+/* Página "Agente analítico" (src/ui/agente.py) */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.agente-conteudo { display: flex; flex-direction: column; gap: 16px; min-height: 100vh; }
+.agente-conversa { flex: 1; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.agente-mensagem { max-width: 820px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); overflow-wrap: anywhere; }
+.agente-usuario { align-self: flex-end; background: var(--green-wash); white-space: pre-wrap; }
+.agente-resposta { align-self: flex-start; }
+.agente-resposta table { border-collapse: collapse; margin: 8px 0; }
+.agente-resposta th, .agente-resposta td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+.agente-erro { align-self: flex-start; background: var(--coral-wash); color: var(--coral); }
+.agente-fontes { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--ink-soft); }
+.agente-uso { margin: 8px 0 0; font-size: 11px; }
+.agente-form { display: flex; flex-direction: column; gap: 8px; position: sticky; bottom: 0; padding-top: 8px; background: inherit; }
+.agente-form textarea { width: 100%; resize: vertical; padding: 10px; border: 1px solid var(--line-strong); border-radius: 10px; font: inherit; }
+.agente-acoes { display: flex; justify-content: space-between; align-items: center; gap: 12px; }

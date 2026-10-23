@@ -448,3 +448,4 @@ Lacuna encontrada na revisão de 06/10/2026: previsto na seção 7 da análise, 
 ## Fora deste TODO
 
 - **Data Lake (Bronze, Silver e Gold): não será implementado** (decisão de 06/10/2026). A pasta `data_lake/` fica só como estrutura.
+- **Agente analítico (LLM + ferramentas + RAG):** tem TODO próprio em [agente/todo.md](agente/todo.md), com decisões DA1 a DA7 e relatório das fases em [agente/analise.md](agente/analise.md).

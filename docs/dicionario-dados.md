@@ -1,6 +1,6 @@
 # Dicionário de dados
 
-Campos do payload da API (`src/api/data_set.json`), o tipo depois da normalização e o destino no banco. As regras de normalização e validação estão em [contrato-dados.md](contrato-dados.md); as colunas, em [modelagem-banco.md](modelagem-banco.md).
+Campos do payload da API (`src/api/data_set.json.gz`), o tipo depois da normalização e o destino no banco. As regras de normalização e validação estão em [contrato-dados.md](contrato-dados.md); as colunas, em [modelagem-banco.md](modelagem-banco.md).
 
 ## Convenções
 
@@ -53,12 +53,16 @@ Para cada parâmetro `X`: `X` → `Leitura_Itens.valor`; `X_tipo_codigo` → `Pa
 
 Nomes de unidade fora do padrão no payload: `oxigenio_dissolvido_medida` e `velocidade_unidade_medida` (para `velocidade_vento`).
 
-## Perfil do dataset atual (9.888 registros)
+## Perfil do dataset atual (59.378 registros)
 
-| Situação | Quantidade | Tratamento |
+| Característica / situação | Quantidade | Tratamento |
 |---|---|---|
-| Sem estação nem operador | 50 | leitura rejeitada |
-| Com estação e sem operador | 32 | leitura rejeitada |
-| Medições nulas nos registros válidos | 2.681 | só o item descartado |
-| Medições fora da faixa nos registros válidos | 603 | só o item descartado |
-| Registros gravados | 9.806 leituras, 104.582 itens | — |
+| Estações | 6: duas no RJ, duas na BA e duas em SP | Uma estação por município |
+| Municípios | Rio de Janeiro, Niterói, Salvador, Feira de Santana, São Paulo e Campinas | Dois municípios em cada estado |
+| Operadores | 12, com 2 por estação | Cada operador está associado a uma única estação |
+| Cadência | 9.888 leituras por estação, duas por hora | Ciclos de 30 minutos de 01/04/2026 a 23/10/2026 |
+| Registros com ao menos uma medição fora da faixa no payload bruto | 5.938 (≈ 10%) | Cada valor inválido é descartado individualmente |
+| Leituras rejeitadas por estação ou operador nulo | 82 | Leitura inteira rejeitada |
+| Medições nulas nos registros válidos | 16.075 | Só o item descartado |
+| Medições fora da faixa nos registros válidos | 5.953 | Só o item descartado |
+| Registros gravados | 59.296 leituras, 630.212 itens | — |

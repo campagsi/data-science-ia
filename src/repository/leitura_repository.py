@@ -76,6 +76,31 @@ class LeituraRepository:
             for linha in self.__database.fetch_all(query, params)
         ]
 
+    def get_cobertura(self) -> list[dict]:
+        """
+        Período coberto e volume de leituras por estação (só leitura).
+
+        Agrega no banco (MIN, MAX e COUNT) para o agente saber o período com
+        dados sem carregar todas as medições. Uma linha por estação com
+        leituras: [{"estacao_codigo", "primeira_leitura", "ultima_leitura", "leituras"}].
+        """
+        query = """
+            SELECT E.codigo_estacao, MIN(L.data_hora), MAX(L.data_hora), COUNT(*)
+            FROM dbo.Leituras AS L
+            INNER JOIN dbo.Estacoes AS E ON E.id_estacao = L.estacao_id
+            GROUP BY E.codigo_estacao
+            ORDER BY E.codigo_estacao
+        """
+        return [
+            {
+                "estacao_codigo": linha[0],
+                "primeira_leitura": linha[1],
+                "ultima_leitura": linha[2],
+                "leituras": int(linha[3]),
+            }
+            for linha in self.__database.fetch_all(query)
+        ]
+
     def substituir_leituras(
         self,
         leituras: list[LeituraModel],

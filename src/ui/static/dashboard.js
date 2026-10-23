@@ -63,6 +63,41 @@ document.querySelectorAll("[data-autosubmit]").forEach((select) => {
   select.addEventListener("change", () => select.form.requestSubmit());
 });
 
+// Estado → cidade → estação: cada filtro só oferece o que pertence à escolha acima.
+const stateFilter = document.querySelector("#state-filter");
+const cityFilter = document.querySelector("#city-filter");
+const stationFilter = document.querySelector("#station-filter");
+
+const limitOptions = (select, matches) => {
+  if (!select) return;
+  [...select.options].forEach((option) => {
+    if (!option.value) return;
+    const visible = matches(option);
+    option.hidden = !visible;
+    option.disabled = !visible;
+  });
+  if (select.selectedOptions[0]?.disabled) select.value = "";
+};
+
+const syncLocationFilters = () => {
+  const uf = stateFilter?.value || "";
+  limitOptions(cityFilter, (option) => !uf || option.dataset.uf === uf);
+  const city = cityFilter?.value || "";
+  limitOptions(stationFilter, (option) =>
+    (!uf || option.dataset.uf === uf) && (!city || option.dataset.municipio === city));
+};
+
+// Escolher a cidade ou a estação primeiro preenche os filtros acima dela.
+const fillParents = (option) => {
+  if (stateFilter && option?.dataset.uf) stateFilter.value = option.dataset.uf;
+  if (cityFilter && option?.dataset.municipio) cityFilter.value = option.dataset.municipio;
+};
+
+stateFilter?.addEventListener("change", syncLocationFilters);
+cityFilter?.addEventListener("change", () => { fillParents(cityFilter.selectedOptions[0]); syncLocationFilters(); });
+stationFilter?.addEventListener("change", () => { fillParents(stationFilter.selectedOptions[0]); syncLocationFilters(); });
+syncLocationFilters();
+
 // Gráfico por período (plugin em period-chart.js) e atalhos das tabelas.
 const charts = window.PeriodChart ? window.PeriodChart.init() : [];
 const periodChart = charts[0];

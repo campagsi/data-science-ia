@@ -80,6 +80,10 @@ Os repositórios recebem a `DatabaseConnection` que devem usar. Assim, `save_rea
 
 A sequência detalhada está em [diagramas/diagrama-sequencia.md](diagramas/diagrama-sequencia.md).
 
+## 6. Agente analítico
+
+Camada de **leitura** sobre os serviços acima: um chat em que um LLM escolhe ferramentas Python (que reaproveitam `LeituraRepository` e `AnaliticsService`) para responder números, e usa RAG sobre `docs/` para explicar regras. Não altera a ingestão, o schema nem a análise. A documentação completa, com diagramas e o TODO próprio, está em [agente/README.md](agente/README.md). Já existem as ferramentas de dados (`src/agente/ferramentas/`), o laço com o Claude Haiku 5.5 e os guardrails (`src/agente/orquestrador.py`, `src/agente/guardrails/`) a CLI (`python main.py --agente` / `--pergunta`), o RAG sobre a documentação (`src/agente/rag/`, `python main.py --indexar`), a página `/agente` do dashboard, a avaliação com golden set (`python -m src.agente.avaliacao`) e a busca de dias semelhantes (`src/agente/dias/`, `python main.py --indexar-dias`). O modelo de previsão de curto prazo é treinado no próprio projeto (`src/previsao/`, `python main.py --treinar-previsao`), com validação temporal, e a ferramenta `prever` só lê o modelo salvo, com o hash conferido. O comando `python main.py --laudo` classifica as anomalias de um período com o LLM, em JSON validado e sinalizado como gerado por IA (`src/agente/laudo/`). As ferramentas leem o banco com um usuário só de leitura ([manual-execucao.md § 4](manual-execucao.md#usuário-só-de-leitura-do-agente-analítico)).
+
 ## Benefícios da arquitetura em camadas
 
 - separação clara das responsabilidades;

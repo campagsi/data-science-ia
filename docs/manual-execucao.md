@@ -126,6 +126,45 @@ Os mesmos scripts podem ser abertos e executados no SSMS ou no Azure Data Studio
 
 Os testes de integração aplicam o DDL e, em seguida, todas as migrations (`tests/integration/conftest.py`), o que também confirma que elas são idempotentes.
 
+### Usuário só de leitura do agente analítico
+
+O agente analítico ([agente/README.md](agente/README.md)) lê o banco com um usuário próprio, `agente_leitura`, que não grava nada e não lê a tabela `Operadores` (políticas POL-01 e POL-02 de [agente/guardrails-e-owasp.md § 9](agente/guardrails-e-owasp.md#9-políticas-de-segurança-do-agente)). O script [sql/seguranca/agente_usuario_leitura.sql](../sql/seguranca/agente_usuario_leitura.sql) **não é uma migration**: ele muda permissões, não a estrutura, por isso fica fora de `sql/migrations/` e não altera o DDL. É idempotente.
+
+1. Quem administra o banco cria o usuário uma vez, com uma senha forte que **não vai para o Git**:
+
+   ```sql
+   CREATE USER agente_leitura WITH PASSWORD = '<senha forte>';
+   ```
+
+2. Aplica as permissões:
+
+   ```bash
+   sqlcmd -S <servidor>.database.windows.net -d <banco> -U <usuario-admin> -P <senha> -f 65001 -i sql/seguranca/agente_usuario_leitura.sql
+   ```
+
+   O script dá `SELECT` só em `Estados`, `Municipios`, `Estacoes`, `Parametros`, `Leituras` e `Leitura_Itens`, nega `SELECT` em `Operadores` e nega `INSERT`, `UPDATE`, `DELETE` e `ALTER` no schema `dbo`. Não use o papel `db_datareader`: ele daria leitura de `Operadores`.
+
+3. No `.env`, `AGENTE_SQL_CONNECTIONSTRING` com `UID=agente_leitura` e a senha. A variável é obrigatória quando `AGENTE_LLM_FORNECEDOR` é `openai` ou `anthropic`, e o agente nunca usa a `AZURE_SQL_CONNECTIONSTRING` da ingestão.
+
+O teste `tests/integration/test_agente_somente_leitura.py` aplica o script num banco descartável e confere que o usuário lê as tabelas das ferramentas, não grava, não altera a estrutura e não lê `Operadores`.
+
+#### Banco local para testar o agente (`agente_local`)
+
+Enquanto o `agente_leitura` não existe no Azure, os testes com o LLM real usam o banco `agente_local` no SQL Server Express (`localhost\SQLEXPRESS`), criado em 21/10/2026:
+
+1. **Banco contido:** `contained database authentication` ligado na instância e `CREATE DATABASE agente_local CONTAINMENT = PARTIAL`. Um banco contido aceita usuário com senha **sem login no servidor**, como no Azure SQL;
+2. **Estrutura e dados:** o DDL e as migrations do projeto, e as tabelas copiadas do banco local `Data Science` (9.806 leituras). O `Data Science` não é alterado;
+3. **Usuário:** `CREATE USER agente_leitura WITH PASSWORD = '...'` e o script `sql/seguranca/agente_usuario_leitura.sql`.
+
+O login com senha exige o SQL Express em **modo misto** (Windows e SQL). A configuração `LoginMode = 2` já foi gravada, mas só vale depois de reiniciar o serviço `MSSQL$SQLEXPRESS`, o que precisa de administrador (`services.msc` ou o reinício do computador). Até lá, o `.env` usa **temporariamente** a autenticação do Windows no `agente_local`, marcada com um comentário. Depois do reinício:
+
+```sql
+-- no banco agente_local, como administrador
+ALTER USER agente_leitura WITH PASSWORD = '<senha forte, fora do Git>';
+```
+
+e, no `.env`, `AGENTE_SQL_CONNECTIONSTRING="Server=localhost\SQLEXPRESS;Database=agente_local;UID=agente_leitura;PWD=<senha>;Encrypt=no"`.
+
 ## 5. Iniciar a API de ingestao
 
 A API disponibiliza o dataset no endpoint:
@@ -203,6 +242,8 @@ No modelo, relacione a fato às dimensões por `estacao_sk`, `parametro_sk` e `t
 
 ### Interface gráfica (dashboard web)
 
+O dashboard também tem a página **Agente analítico** (`http://127.0.0.1:5000/agente`, link "Abrir o agente" no menu). Ela usa as mesmas variáveis do agente da seção [Agente analítico](#agente-analítico-perguntas-em-linguagem-natural), limita as perguntas por IP (`AGENTE_LIMITE_WEB`) e, com `AGENTE_CHAVE_WEB` preenchida, exige o header `X-API-Key`, que a página pede num campo. **Preencha a chave antes de expor o servidor além do `127.0.0.1`**: cada pergunta custa tokens.
+
 Na raiz de `Data-Science-Ia`, com o ambiente virtual ativado e as variáveis de ambiente configuradas, inicie o servidor Flask:
 
 ```bash
@@ -211,8 +252,8 @@ python -m flask --app src.ui.app run --host 127.0.0.1 --port 5000
 
 Abra <http://127.0.0.1:5000> no navegador. O dashboard permite:
 
-- filtrar as medições por estação, parâmetro e período (com atalhos de 7, 30 e 90 dias até a última medição);
-- ver a série temporal por **semana, mês, ano ou tudo**, navegando entre períodos (botões ‹ › ou setas do teclado), com média, faixa mín.–máx., anomalias marcadas, comparação com o período anterior e o perfil médio por hora do dia. Clicar em um ponto abre o mês ou a semana correspondente. A "escala ajustada" impede que picos isolados achatem a série; "Escala completa" mostra o eixo inteiro;
+- filtrar as medições por estado, cidade, estação, parâmetro e período (com atalhos de 7, 30 e 90 dias até a última medição). Os filtros de local são encadeados: o estado limita as cidades, a cidade limita as estações, e escolher uma estação preenche a cidade e o estado dela. O cabeçalho da página mostra o filtro aplicado: com uma estação, o título passa a "Leituras da estação", com o código, o nome, a cidade e o estado dela; sem estação, mostra "Todas as estações" e, se houver, a cidade e o estado filtrados. Se a cidade e o estado das estações não puderem ser lidos, a lateral mostra só o filtro de estação (WARNING no log);
+- ver a série temporal por **semana, mês, ano ou tudo**, navegando entre períodos (botões ‹ › ou setas do teclado), com média, faixa mín.–máx., anomalias marcadas, comparação com o período anterior e o perfil médio por hora do dia (média de cada hora no período exibido, com o período e o número de dias no título, por exemplo "Perfil médio por hora · 19 a 25/10 (7 dias)"). Clicar em um ponto abre o mês ou a semana correspondente; na visão Semana, o clique compara o dia com a média: as barras continuam com a média da semana e o dia aparece como uma linha por cima (título "Seg., 20/10 × média de 19 a 25/10"), até clicar em "Voltar à média". A "escala ajustada" impede que picos isolados achatem a série; "Escala completa" mostra o eixo inteiro;
 - navegar pelas tabelas de resumo estatístico, alertas e medições **paginadas** (10, 25, 50 ou 100 linhas por página);
 - exportar **todo** o recorte filtrado em CSV (separador `;`, decimal com vírgula), não só a página exibida;
 - alternar entre tema claro e escuro;
@@ -271,6 +312,47 @@ python main.py --analise --inicio 2026-06-01 --fim 2026-06-30 # intervalo (só -
 
 O relatório (métricas por estação e parâmetro) vai para o log da execução em `INFO`, e cada medição anômala vai numa linha `WARNING` com o indicador de alerta (`IQR`, `ZSCORE` ou `IQR+ZSCORE`). Estação inexistente encerra com `CRITICAL` e código `1`. As mesmas métricas podem ser conferidas direto no banco com [sql/queries_analiticas.sql](../sql/queries_analiticas.sql). Regras em [analise-estatistica.md](analise-estatistica.md).
 
+### Agente analítico (perguntas em linguagem natural)
+
+O agente responde perguntas como "qual o pH médio em junho?" com um LLM (Claude Haiku 5.5, decisão DA9) que escolhe ferramentas Python só de leitura. Documentação completa em [agente/README.md](agente/README.md).
+
+**Antes do primeiro uso:**
+
+1. Chave do LLM, com um **limite de gasto mensal** configurado no painel do fornecedor: OpenAI (`OPENAI_API_KEY`, modelo `gpt-4.1-mini`, decisão DA11) ou Anthropic (`ANTHROPIC_API_KEY`, `claude-haiku-5-5`). Na rodada de 21/10/2026, cada pergunta usou em média ~11 mil tokens de entrada e ~150 de saída no `gpt-4.1-mini`.
+2. Usuário só de leitura `agente_leitura` criado no banco (seção 4, [Usuário só de leitura do agente analítico](#usuário-só-de-leitura-do-agente-analítico)).
+3. No `.env`: `AGENTE_LLM_FORNECEDOR=openai`, `AGENTE_LLM_MODELO=gpt-4.1-mini`, `OPENAI_API_KEY` e `AGENTE_SQL_CONNECTIONSTRING` (ou `anthropic`, `claude-haiku-5-5` e `ANTHROPIC_API_KEY`). As variáveis opcionais e os padrões estão no `.env.example` e em [agente/arquitetura.md § 9](agente/arquitetura.md#9-configuração).
+
+**Uso:**
+
+```bash
+python main.py --indexar                                       # (re)indexa a documentação (RAG); idempotente
+python main.py --indexar-dias                                  # (re)indexa os resumos diários (ferramenta dias_semelhantes)
+python main.py --treinar-previsao                              # treina e avalia o modelo de previsão (ferramenta prever)
+python main.py --laudo --inicio 2026-06-01 --fim 2026-06-30    # laudos das anomalias do período (LLM)
+python main.py --pergunta "Qual o pH médio em junho de 2026?"   # uma pergunta, resposta no terminal
+python main.py --agente                                         # chat; "sair" ou Ctrl+C encerram
+```
+
+**Índice da documentação:** para o agente explicar regras e decisões citando os documentos (ferramenta `buscar_documentacao`), rode `python main.py --indexar` uma vez e **de novo sempre que a documentação mudar**. A primeira vez baixa o modelo de embeddings (~0,24 GB) para `data/agente/modelos/` e leva cerca de 30 s. As seguintes só vetorizam os trechos que mudaram, e sem mudança registram `inseridos=0 removidos=0`. Sem índice, o agente responde números normalmente, só sem citar a documentação, e registra um aviso no log. O banco vetorial padrão é em memória (`data/agente/indice_docs.*`). Com `AGENTE_VETORES=chroma` no `.env`, o índice vai para o ChromaDB (`data/agente/chroma`); ao trocar, rode `--indexar` de novo.
+
+A resposta mostra as **fontes** (ferramentas executadas, com os argumentos) e os tokens consumidos. O log da execução (etapa `agente`, em `logs/`) tem uma linha por pergunta, com CPF, e-mail e telefone mascarados, uma por ferramenta e uma por resposta. Também registra uma linha `WARNING guardrail=POL-xx` sempre que uma política de segurança age. Variável ausente ou inválida encerra com `CRITICAL` e código `1`, sem mostrar valores.
+
+**Estudo sem custo e sem chave:** `python -m src.agente.exemplos.e05_tool_use_passo_a_passo`, `e06_agente_offline` e `e11_guardrails` usam o LLM roteirizado e dados de exemplo em memória.
+
+**Índice dos dias:** `python main.py --indexar-dias` lê as medições com `AGENTE_SQL_CONNECTIONSTRING` (usuário só de leitura), gera um resumo por estação e dia e o indexa em `data/agente/dias/`. Rode depois de cada ingestão: só os dias cujo resumo mudou são vetorizados de novo. Sem esse índice, o agente funciona sem a ferramenta `dias_semelhantes` ("que dias foram parecidos com 15/06?").
+
+**Modelo de previsão:** `python main.py --treinar-previsao` lê as medições com `AGENTE_SQL_CONNECTIONSTRING` e avalia temperatura do ar, umidade, temperatura da água e radiação em 1, 3, 6, 12 e 24 h, com validação temporal contra dois baselines (leva cerca de 1 minuto). Grava o modelo e o `metadados.json` em `data/agente/modelos/previsao/` e o relatório em `relatorios/previsao_<data>.md`. Só os horizontes em que o modelo vence os dois baselines ficam disponíveis para a ferramenta `prever`. **Treine de novo depois de atualizar o scikit-learn**: o agente recusa um modelo de outra versão (POL-12) e segue sem a `prever`, com um aviso no log.
+
+**Laudos de anomalias:** `python main.py --laudo --inicio AAAA-MM-DD [--fim AAAA-MM-DD] [--estacao CODIGO] [--limite N]` pede ao LLM a causa provável de cada anomalia (falha de sensor, evento real ou inconclusivo) e a severidade, com o contexto vizinho. Exige as mesmas variáveis do agente (chave da Anthropic e `AGENTE_SQL_CONNECTIONSTRING`). Por padrão, faz no máximo 50 laudos, das anomalias mais extremas (`--limite 0` = todas; cerca de US$ 0,002 por laudo no Haiku). Grava `relatorios/laudos_<inicio>_<fim>.csv` e `.md`, marcados como gerados por IA. Resposta fora do formato é descartada e aparece no log (`guardrail=POL-06`) e na lista de descartados do Markdown. O laudo não altera o banco nem o indicador de alerta.
+
+**Avaliação do agente (golden set):** mede a qualidade com 52 perguntas de referência ([agente/avaliacao.md](agente/avaliacao.md)). O relatório vai para `relatorios/` (fora do Git), e o log, para a etapa `avaliacao`.
+
+```bash
+python -m src.agente.avaliacao --so-recuperacao   # grátis: só a busca na documentação (precisa do índice)
+python -m src.agente.avaliacao                    # completa: ~52 perguntas ao LLM (~US$ 0,50 a 1,00 no Haiku)
+python -m src.agente.avaliacao --lote             # só a seleção de ferramentas, pela Batch API (metade do preço)
+```
+
 ### Interface de consulta no terminal
 
 `python main.py` sem argumentos abre a CLI: escolha o município, a estação e o período (datas em `dd/mm/aaaa`). A tela mostra as métricas de todos os parâmetros e as anomalias; a opção `0` salva `estatisticas.csv` e `anomalias.csv` em `relatorios/` (fora do Git).
@@ -311,7 +393,7 @@ python -m pytest tests
 python -m pytest tests/unit/test_security.py tests/unit/test_logger.py
 ```
 
-Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (resultado esperado: `205 passed, 18 skipped`). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
+Sem configuração adicional, os testes unitários são executados e os de integração são ignorados (os totais atuais, e as falhas que já existiam, estão na seção 4 de [plano-testes.md](plano-testes.md)). Os testes usam chaves próprias definidas em `tests/conftest.py`, então não dependem da `CHAVE_CRIPTOGRAFIA` do `.env`. O guia completo (testes de integração em SQL Server de teste, cobertura, execução de testes específicos e problemas comuns) está na seção 4 de [plano-testes.md](plano-testes.md).
 
 ## Estrutura executada
 

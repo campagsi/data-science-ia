@@ -256,7 +256,7 @@ Com a API de dados rodando no terminal anterior, inicie a interface Flask em out
 python -m flask --app src.ui.app run --host 127.0.0.1 --port 5000
 ```
 
-Abra `http://127.0.0.1:5000`. O dashboard permite executar a ingestão e explorar as medições por estação, parâmetro e período, com gráfico navegável por semana, mês e ano, tabelas paginadas e exportação do recorte filtrado em CSV. A visualização consulta somente dados analíticos do banco. A página `/api-bi` ("Testar API do BI") verifica as rotas do Power BI e mostra uma amostra da resposta. Detalhes na seção 6 de `docs/manual-execucao.md`.
+Abra `http://127.0.0.1:5000`. O dashboard permite executar a ingestão e explorar as medições por estação, parâmetro e período, com gráfico navegável por semana, mês e ano, tabelas paginadas e exportação do recorte filtrado em CSV. A visualização consulta somente dados analíticos do banco. A página `/api-bi` ("Testar API do BI") verifica as rotas do Power BI e mostra uma amostra da resposta. A página `/agente` é o chat com o agente analítico. Detalhes na seção 6 de `docs/manual-execucao.md`.
 
 ### 4. Executar a ingestão
 
@@ -284,6 +284,19 @@ python main.py --analise --inicio 2026-06-01
 ```
 
 O intervalo é inclusivo; informar apenas `--inicio` analisa aquele dia. Métricas e anomalias são escritas no log. Os alertas indicam IQR, Z-Score ou ambos. Consultas SQL equivalentes estão em `sql/queries_analiticas.sql`.
+
+### 5.1 Perguntar ao agente analítico
+
+```powershell
+python main.py --indexar        # índice da documentação (rode de novo quando os docs mudarem)
+python main.py --indexar-dias   # índice dos resumos diários (rode de novo depois de cada ingestão)
+python main.py --treinar-previsao  # modelo de previsão de 1 a 24 h, com validação temporal
+python main.py --laudo --inicio 2026-06-01 --fim 2026-06-30  # laudos das anomalias (LLM, JSON validado)
+python main.py --pergunta "Qual o pH médio em junho de 2026?"
+python main.py --agente
+```
+
+Um LLM (Claude Haiku 5.5) escolhe ferramentas Python só de leitura e responde com as fontes. Exige a chave da Anthropic e o usuário só de leitura do banco. Configuração e custos em `docs/manual-execucao.md` (seção 6) e `docs/agente/`.
 
 ### 6. Consultar e exportar
 
@@ -334,15 +347,20 @@ Não execute testes de integração contra o banco de produção. Consulte [docs
 Data-Science-Ia/
 ├── data_lake/             # pastas Bronze/Silver/Gold; persistência ainda não integrada
 ├── docs/                   # requisitos, arquitetura, runbook, contratos e diagramas
+├── data/agente/            # índices vetoriais, modelo de embeddings e modelo de previsão; fora do Git
 ├── logs/                   # logs de execução e rejeitados; fora do Git
+├── relatorios/             # relatórios gerados (análise, avaliação, previsão, laudos); fora do Git
 ├── src/
+│   ├── agente/             # agente analítico: LLM, ferramentas, RAG, guardrails, avaliação, dias semelhantes e laudo
 │   ├── api/                # API FastAPI: dataset de ingestão e camada Gold para o Power BI
-│   ├── cli/                # consulta interativa e exportação
+│   ├── cli/                # consulta interativa, exportação e chat do agente
 │   ├── database/           # conexão e transações com Azure SQL
 │   ├── ingestion/          # cliente HTTP e importação relacional
 │   ├── models/             # modelos das entidades
+│   ├── previsao/           # modelo de previsão de curto prazo (treinado fora do chat)
 │   ├── repository/         # persistência por entidade
-│   └── services/           # normalização, contrato, validação e análise
+│   ├── services/           # normalização, contrato, validação e análise
+│   └── ui/                 # dashboard Flask e página /agente
 ├── sql/                    # DDL, migrations, DML e consultas analíticas
 ├── tests/                  # testes unitários e de integração
 ├── main.py                 # ponto de entrada e orquestração
@@ -361,6 +379,7 @@ Data-Science-Ia/
 - [docs/seguranca-lgpd.md](docs/seguranca-lgpd.md) — proteção de dados pessoais, segredos e logs.
 - [docs/analise-estatistica.md](docs/analise-estatistica.md) — métricas e regras de anomalia.
 - [docs/plano-testes.md](docs/plano-testes.md) — estratégia de testes.
+- [docs/agente/](docs/agente/README.md) — agente analítico (chat com LLM, ferramentas e RAG): análise, arquitetura, diagramas, guardrails, bibliotecas, guia de estudos e TODO próprio. Fases 0 a 8 implementadas: ferramentas descritivas e de inferência, Claude Haiku 5.5, guardrails, CLI, RAG (memória ou ChromaDB), página `/agente`, avaliação com golden set, dias semelhantes, previsão de curto prazo (`src/previsao/`) e laudo de anomalias em JSON (`--laudo`).
 - [docs/diagramas/diagrama-contexto.md](docs/diagramas/diagrama-contexto.md), [docs/diagramas/diagrama-atividade.md](docs/diagramas/diagrama-atividade.md) e [docs/diagramas/diagrama-sequencia.md](docs/diagramas/diagrama-sequencia.md) — diagramas da solução.
 
 Para decisões, requisitos funcionais e acompanhamento das fases, consulte também `docs/requisitos.md`, `docs/analise-implementacao.md` e `docs/todo-idempotencia.md`.

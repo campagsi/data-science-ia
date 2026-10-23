@@ -14,10 +14,6 @@ import main
 from src.repository import EstacaoRepository, LeituraRepository, MunicipioRepository
 from src.services.analytics_service import AnaliticsService
 
-ITENS_GRAVADOS = 104582
-LEITURAS_GRAVADAS = 9806
-
-
 @pytest.fixture(scope="module")
 def analise(banco_carregado):
     return AnaliticsService(banco_carregado).calculate_metrics()
@@ -29,9 +25,11 @@ def _consulta(database, lote: str) -> list[tuple]:
 
 def test_get_medicoes_devolve_todos_os_itens_gravados(banco_carregado):
     medicoes = LeituraRepository(banco_carregado).get_medicoes()
+    itens_gravados = banco_carregado.fetch_one("SELECT COUNT(*) FROM dbo.Leitura_Itens")[0]
+    leituras_gravadas = banco_carregado.fetch_one("SELECT COUNT(*) FROM dbo.Leituras")[0]
 
-    assert len(medicoes) == ITENS_GRAVADOS
-    assert len({m["codigo_registro"] for m in medicoes}) == LEITURAS_GRAVADAS
+    assert len(medicoes) == itens_gravados
+    assert len({m["codigo_registro"] for m in medicoes}) == leituras_gravadas
     assert set(medicoes[0]) == {
         "estacao_id", "estacao_codigo", "estacao", "codigo_registro", "data_hora",
         "codigo_parametro", "parametro", "unidade_medida", "valor",
@@ -52,38 +50,51 @@ def test_get_medicoes_filtra_por_dia_periodo_estacao_e_parametro(banco_carregado
 
     assert {m["data_hora"].date() for m in um_dia} == {dia}
     assert {m["data_hora"].date() for m in periodo} == set(dias[1:6])
-    assert 0 < len(um_dia) < len(periodo) < ITENS_GRAVADOS
+    assert 0 < len(um_dia) < len(periodo) < len(repositorio.get_medicoes())
     assert {m["codigo_parametro"] for m in so_ph} == {"TIP-PH"}
     assert len(so_ph) == sum(1 for m in um_dia if m["codigo_parametro"] == "TIP-PH")
     assert repositorio.get_medicoes(estacao_id=-1) == []
 
 
 def test_municipios_e_estacoes_para_a_cli(banco_carregado):
-    (municipio,) = MunicipioRepository(banco_carregado).get_com_estacoes()
-    (estacao,) = EstacaoRepository(banco_carregado).get_by_municipio(municipio["id"])
+    municipios = MunicipioRepository(banco_carregado).get_com_estacoes()
+    estacoes_repository = EstacaoRepository(banco_carregado)
 
-    assert municipio["sigla"] == "RJ"
-    assert EstacaoRepository(banco_carregado).get_by_codigo(estacao.codigo_estacao) == estacao
-    assert EstacaoRepository(banco_carregado).get_by_codigo("NAO-EXISTE") is None
-    assert LeituraRepository(banco_carregado).get_medicoes(municipio_id=municipio["id"], data_inicio=date(2000, 1, 1)) == []
+    assert len(municipios) > 1
+    for municipio in municipios:
+        estacoes = estacoes_repository.get_by_municipio(municipio["id"])
+        assert estacoes
+        for estacao in estacoes:
+            assert estacoes_repository.get_by_codigo(estacao.codigo_estacao) == estacao
+        assert LeituraRepository(banco_carregado).get_medicoes(
+            municipio_id=municipio["id"], data_inicio=date(2000, 1, 1)
+        ) == []
+    assert estacoes_repository.get_by_codigo("NAO-EXISTE") is None
 
 
-def test_analise_cobre_os_11_parametros(analise):
-    assert analise["leituras"] == LEITURAS_GRAVADAS
-    assert analise["medicoes"] == ITENS_GRAVADOS
-    assert len(analise["estatisticas"]) == 11
-    assert sum(e["Quantidade"] for e in analise["estatisticas"]) == ITENS_GRAVADOS
+def test_analise_cobre_os_11_parametros(banco_carregado, analise):
+    assert analise["leituras"] > 0
+    estacoes = EstacaoRepository(banco_carregado).get_all()
+    assert len(analise["estatisticas"]) == len(estacoes) * 11
+    assert sum(e["Quantidade"] for e in analise["estatisticas"]) == analise["medicoes"]
     assert sum(e["Anomalias"] for e in analise["estatisticas"]) == len(analise["anomalias"])
     assert {a["Alerta"] for a in analise["anomalias"]} <= {"IQR", "ZSCORE", "IQR+ZSCORE"}
 
 
 def test_consulta_de_metricas_bate_com_o_servico(banco_carregado, consultas_analiticas, analise):
-    sql = {linha[2]: linha for linha in _consulta(banco_carregado, consultas_analiticas[0])}
-    servico = {e["Código"]: e for e in analise["estatisticas"]}
+    sql = {(linha[0], linha[2]): linha for linha in _consulta(banco_carregado, consultas_analiticas[0])}
+    nomes_estacoes = {
+        estacao.nome: estacao.codigo_estacao
+        for estacao in EstacaoRepository(banco_carregado).get_all()
+    }
+    servico = {
+        (nomes_estacoes[e["Estação"]], e["Código"]): e
+        for e in analise["estatisticas"]
+    }
 
     assert set(sql) == set(servico)
-    for codigo, (_, _, _, _, unidade, quantidade, media, desvio, variancia, minimo, maximo) in sql.items():
-        e = servico[codigo]
+    for chave, (_, _, _, _, unidade, quantidade, media, desvio, variancia, minimo, maximo) in sql.items():
+        e = servico[chave]
         assert (unidade, quantidade) == (e["Unidade"], e["Quantidade"])
         assert media == pytest.approx(e["Média"])
         assert desvio == pytest.approx(e["Desvio Padrão"])
@@ -92,13 +103,20 @@ def test_consulta_de_metricas_bate_com_o_servico(banco_carregado, consultas_anal
 
 
 def test_consulta_de_quartis_bate_com_o_servico(banco_carregado, consultas_analiticas, analise):
-    servico = {e["Código"]: e for e in analise["estatisticas"]}
+    nomes_estacoes = {
+        estacao.nome: estacao.codigo_estacao
+        for estacao in EstacaoRepository(banco_carregado).get_all()
+    }
+    servico = {
+        (nomes_estacoes[e["Estação"]], e["Código"]): e
+        for e in analise["estatisticas"]
+    }
 
     linhas = _consulta(banco_carregado, consultas_analiticas[1])
 
-    assert len(linhas) == 11
-    for _, codigo, mediana, q1, q3, iqr, inferior, superior in linhas:
-        e = servico[codigo]
+    assert len(linhas) == len(servico)
+    for estacao, codigo, mediana, q1, q3, iqr, inferior, superior in linhas:
+        e = servico[(estacao, codigo)]
         assert (mediana, q1, q3, iqr) == pytest.approx((e["Mediana"], e["Q1"], e["Q3"], e["IQR"]))
         assert (inferior, superior) == pytest.approx((e["Limite Inferior"], e["Limite Superior"]))
 
@@ -119,24 +137,26 @@ def test_consulta_de_anomalias_bate_com_o_servico(banco_carregado, consultas_ana
 def test_consultas_de_volume(banco_carregado, consultas_analiticas):
     por_dia = _consulta(banco_carregado, consultas_analiticas[3])
     por_parametro = _consulta(banco_carregado, consultas_analiticas[4])
+    leituras_gravadas = banco_carregado.fetch_one("SELECT COUNT(*) FROM dbo.Leituras")[0]
+    itens_gravados = banco_carregado.fetch_one("SELECT COUNT(*) FROM dbo.Leitura_Itens")[0]
 
-    assert sum(linha[2] for linha in por_dia) == LEITURAS_GRAVADAS
-    assert sum(linha[3] for linha in por_dia) == ITENS_GRAVADOS
+    assert sum(linha[2] for linha in por_dia) == leituras_gravadas
+    assert sum(linha[3] for linha in por_dia) == itens_gravados
     assert len(por_parametro) == 11
-    assert sum(linha[2] for linha in por_parametro) == ITENS_GRAVADOS
+    assert sum(linha[2] for linha in por_parametro) == itens_gravados
 
 
 def test_analise_pelo_main_registra_cada_anomalia_no_log(banco_carregado, analise, logs_temporarios):
-    (estacao,) = EstacaoRepository(banco_carregado).get_all()
+    estacao = EstacaoRepository(banco_carregado).get_all()[0]
 
     relatorio = main.gerar_relatorio(banco_carregado, estacao.codigo_estacao)
 
     linhas = logs_temporarios("pipeline")
     alertas = [linha for linha in linhas if "Alerta de qualidade" in linha]
     assert relatorio["escopo"] == {"estacao_id": estacao.id_estacao}
-    assert len(alertas) == len(relatorio["anomalias"]) == len(analise["anomalias"])
+    assert len(alertas) == len(relatorio["anomalias"])
     assert all("[WARNING]" in linha for linha in alertas)
     assert Counter(linha.split("alerta=")[1].split()[0] for linha in alertas) == Counter(
-        a["Alerta"] for a in analise["anomalias"]
+        a["Alerta"] for a in relatorio["anomalias"]
     )
     assert any("Relatório da execução" in linha for linha in linhas)

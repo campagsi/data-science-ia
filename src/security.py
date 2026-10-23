@@ -92,3 +92,72 @@ def descriptografar_email(token: str | None) -> str | None:
         raise ValueError(
             "Não foi possível descriptografar o e-mail: token inválido ou chave diferente."
         ) from error
+
+
+# --- Texto livre (agente analítico, política POL-02) -------------------------
+# A pergunta digitada no chat pode conter dado pessoal. Ela é mascarada antes de
+# ir ao LLM, ao histórico e ao log, e a resposta é mascarada antes de sair.
+
+MARCADOR_CPF = "[CPF]"
+MARCADOR_EMAIL = "[EMAIL]"
+MARCADOR_TELEFONE = "[TELEFONE]"
+
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+# Cuidado: as bordas recusam dígito, ou ponto/hífen SEGUIDO de dígito ("1.234.567.890-12"), mas
+# aceitam a pontuação de fim de frase ("Meu CPF é 529.982.247-25."), que antes impedia a máscara.
+_CPF = re.compile(r"(?<!\d)(?<!\d[.\-])\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d|[.\-]\d)")
+# Telefone brasileiro com DDD: (21) 98765-4321, 21 98765-4321, +55 21 3456-7890, 21987654321.
+_TELEFONE = re.compile(r"(?<!\d)(?<!\d[.,])(?:\+?55\s?)?\(?[1-9]{2}\)?[\s-]?9?\d{4}[\s-]?\d{4}(?!\d|[.,]\d)")
+
+
+def cpf_valido(texto: str) -> bool:
+    """
+    Confere os dois dígitos verificadores de um CPF (com ou sem pontuação).
+
+    Por quê: sem essa conferência, qualquer número de 11 dígitos seria tratado
+    como CPF. Com ela, a máscara só troca o que é de fato um CPF possível.
+
+    Example:
+        >>> cpf_valido("529.982.247-25"), cpf_valido("529.982.247-26"), cpf_valido("111.111.111-11")
+        (True, False, False)
+    """
+    digitos = [int(c) for c in texto if c.isdigit()]
+    if len(digitos) != 11 or len(set(digitos)) == 1:
+        return False
+    for posicao in (9, 10):
+        soma = sum(d * peso for d, peso in zip(digitos[:posicao], range(posicao + 1, 1, -1)))
+        if (soma * 10 % 11) % 10 != digitos[posicao]:
+            return False
+    return True
+
+
+def mascarar_texto_livre(texto: str) -> str:
+    """
+    Troca CPF, e-mail e telefone por marcadores em texto livre (pergunta e resposta do agente).
+
+    Cobre CPF (com ou sem pontuação, só quando os dígitos verificadores
+    conferem), e-mail e telefone brasileiro com DDD. Números de medição
+    ("7,38", "1.402 medições", datas) não são alterados. Não é anonimização
+    completa: nomes próprios não são detectáveis com segurança por regex, por
+    isso o agente também não registra as respostas inteiras no log.
+
+    Example:
+        >>> mascarar_texto_livre("CPF 529.982.247-25, email ana@ex.com, tel (21) 98765-4321")
+        'CPF [CPF], email [EMAIL], tel [TELEFONE]'
+        >>> mascarar_texto_livre("pH médio 7,38 em 1.402 medições até 23/10/2026")
+        'pH médio 7,38 em 1.402 medições até 23/10/2026'
+    """
+    texto = _EMAIL.sub(MARCADOR_EMAIL, texto)
+    texto = _CPF.sub(lambda achado: MARCADOR_CPF if cpf_valido(achado.group(0)) else achado.group(0), texto)
+    return _TELEFONE.sub(MARCADOR_TELEFONE, texto)
+
+
+def contem_dado_pessoal(texto: str) -> bool:
+    """
+    True se o texto tem CPF válido, e-mail ou telefone (o mesmo critério da máscara).
+
+    Example:
+        >>> contem_dado_pessoal("operador ana@ex.com"), contem_dado_pessoal("turbidez 4,1 NTU")
+        (True, False)
+    """
+    return mascarar_texto_livre(texto) != texto

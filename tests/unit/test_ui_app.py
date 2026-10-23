@@ -19,6 +19,8 @@ def client(monkeypatch):
         "get_medicoes",
         lambda self: [],
     )
+    # Cidade e estado das estações: cobertos em test_ui_dashboard.py; aqui, sem banco.
+    monkeypatch.setattr(dashboard_module, "_localizacao_das_estacoes", lambda database: {})
     dashboard_module.limpar_cache()
     dashboard_module.app.config.update(TESTING=True)
     yield dashboard_module.app.test_client()

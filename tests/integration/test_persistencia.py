@@ -42,23 +42,26 @@ def _estado(database) -> list[tuple]:
 def test_save_readings_grava_todas_as_entidades(database, contagens, lote):
     validos = lote["validos"]
     itens = sum(len(r["itens"]) for r in validos)
+    municipios = {(r["cidade_estado"], r["municipio"]) for r in validos}
+    operadores = {r["operador_codigo"] for r in validos}
+    estacoes = {r["estacao_codigo"] for r in validos}
 
     resumo = _gravar(database, lote)
 
-    assert len(validos) == 9806 and itens == 104582
+    assert validos and itens > 0
     assert resumo == {
-        "municipios": 1,
-        "operadores": 1,
-        "estacoes": 1,
+        "municipios": len(municipios),
+        "operadores": len(operadores),
+        "estacoes": len(estacoes),
         "leituras_removidas": 0,
         "leituras_gravadas": len(validos),
         "itens_gravados": itens,
     }
     assert contagens() == {
         "Estados": 27,
-        "Municipios": 1,
-        "Estacoes": 1,
-        "Operadores": 1,
+        "Municipios": len(municipios),
+        "Estacoes": len(estacoes),
+        "Operadores": len(operadores),
         "Parametros": 11,
         "Leituras": len(validos),
         "Leitura_Itens": itens,

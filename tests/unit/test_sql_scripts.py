@@ -1,9 +1,7 @@
 """Coerência dos scripts SQL com o payload da API, sem precisar de banco."""
-import json
 import re
 from pathlib import Path
 
-import pytest
 
 RAIZ = Path(__file__).resolve().parents[2]
 DML = (RAIZ / "sql" / "dml_populacao.sql").read_text(encoding="utf-8-sig")
@@ -24,11 +22,6 @@ UNIDADE_ALTERNATIVA = {
 }
 
 
-@pytest.fixture(scope="module")
-def dataset():
-    return json.loads((RAIZ / "src" / "api" / "data_set.json").read_text(encoding="utf-8"))
-
-
 def test_dml_cadastra_as_27_unidades_federativas():
     assert len(ESTADOS) == 27
     assert len(set(ESTADOS.values())) == 27
@@ -43,7 +36,7 @@ def test_dml_cobre_os_estados_do_dataset(dataset):
 
 def test_dml_cadastra_todos_os_parametros_do_dataset_com_a_mesma_unidade(dataset):
     """
-    Percorre todos os registros: um parâmetro novo no data_set.json faz este
+    Percorre todos os registros: um parâmetro novo no data_set.json.gz faz este
     teste falhar, lembrando de incluí-lo no DML com nome legível e faixa.
     Na ingestão, um parâmetro fora do DML não bloqueia a carga: é cadastrado
     automaticamente (fase 7 do TODO).

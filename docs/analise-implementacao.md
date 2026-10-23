@@ -46,7 +46,7 @@ Conexão feita no banco `impacta` (Azure SQL) com consultas somente de leitura e
 
 ## 3. Mapeamento do payload novo para as tabelas
 
-Payload atual da API (`src/api/data_set.json`): **9.888 registros**, um registro por ciclo de estação.
+Payload atual da API (`src/api/data_set.json.gz`): **9.888 registros**, um registro por ciclo de estação.
 
 | Campo(s) do payload | Destino | Observação |
 |---|---|---|

@@ -27,24 +27,34 @@ def pipeline(monkeypatch, database, connection_string, seguranca, logs_temporari
     return logs_temporarios
 
 
-def test_duas_execucoes_seguidas_geram_o_mesmo_banco(pipeline, contagens):
+def test_duas_execucoes_seguidas_geram_o_mesmo_banco(pipeline, contagens, lote, normalizados):
+    validos = lote["validos"]
+    itens_gravados = sum(len(registro["itens"]) for registro in validos)
+    itens_descartados = sum(
+        len(registro["itens_invalidos"])
+        for registro in lote["resultados"]
+        if registro["valido"]
+    )
     primeira = main.run_pipeline()
     depois_da_primeira = contagens()
     segunda = main.run_pipeline()
 
     assert primeira == {
-        "recebidos": 9888,
+        "recebidos": len(normalizados),
         "rejeitados_na_normalizacao": 0,
-        "registros_validos": 9806,
-        "registros_invalidos": 82,
-        "itens_descartados": 2681 + 603,
-        "leituras_gravadas": 9806,
+        "registros_validos": len(validos),
+        "registros_invalidos": len(normalizados) - len(validos),
+        "itens_descartados": itens_descartados,
+        "leituras_gravadas": len(validos),
         "leituras_substituidas": 0,
-        "itens_gravados": 104582,
+        "itens_gravados": itens_gravados,
     }
-    assert segunda == dict(primeira, leituras_substituidas=9806)
+    assert segunda == dict(primeira, leituras_substituidas=len(validos))
     assert contagens() == depois_da_primeira
-    assert any("Resumo da ingestão: recebidos=9888" in linha for linha in pipeline("pipeline"))
+    assert any(
+        f"Resumo da ingestão: recebidos={len(normalizados)}" in linha
+        for linha in pipeline("pipeline")
+    )
 
 
 def test_banco_mais_rejeitados_fecha_com_o_recebido(pipeline, database, normalizados):

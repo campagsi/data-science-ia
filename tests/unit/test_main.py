@@ -228,7 +228,13 @@ def test_gerar_relatorio_com_estacao_inexistente_falha(pipeline_falso):
     ],
 )
 def test_ler_argumentos(argv, esperado):
-    assert vars(main.ler_argumentos(argv)) == esperado
+    sem_agente = {"agente": False, "pergunta": None, "indexar": False, "indexar_dias": False, "treinar_previsao": False, "laudo": False, "limite": None}
+    assert vars(main.ler_argumentos(argv)) == {**esperado, **sem_agente}
+
+
+def test_ler_argumentos_do_agente():
+    assert main.ler_argumentos(["--agente"]).agente
+    assert main.ler_argumentos(["--pergunta", "Qual o pH médio em junho?"]).pergunta == "Qual o pH médio em junho?"
 
 
 @pytest.mark.parametrize(
@@ -239,6 +245,16 @@ def test_ler_argumentos(argv, esperado):
         ["--analise", "--fim", "2026-06-30"],
         ["--analise", "--inicio", "2026-07-01", "--fim", "2026-06-30"],
         ["--analise", "--inicio", "01/06/2026"],
+        ["--agente", "--pergunta", "pH?"],
+        ["--analise", "--agente"],
+        ["--pergunta", "pH?", "--estacao", "EST-1"],
+        ["--indexar", "--agente"],
+        ["--indexar", "--indexar-dias"],
+        ["--treinar-previsao", "--indexar"],
+        ["--laudo"],
+        ["--laudo", "--inicio", "2026-06-01", "--limite", "-1"],
+        ["--analise", "--limite", "5"],
+        ["--laudo", "--analise", "--inicio", "2026-06-01"],
     ],
 )
 def test_argumentos_invalidos_encerram_com_erro(argv):
@@ -350,7 +366,10 @@ def test_iniciar_aplicacao_configura_logs_antes_da_configuracao(monkeypatch):
 
 @pytest.mark.parametrize(
     ("argv", "etapa"),
-    [(["--ingestao"], "ingestao"), (["--analise"], "analise"), ([], "consulta")],
+    [(["--ingestao"], "ingestao"), (["--analise"], "analise"), ([], "consulta"),
+     (["--agente"], "agente"), (["--pergunta", "pH?"], "agente"), (["--indexar"], "indexacao"),
+     (["--indexar-dias"], "indexacao"), (["--treinar-previsao"], "previsao"),
+     (["--laudo", "--inicio", "2026-06-01"], "laudo")],
 )
 def test_etapa_da_execucao_vem_dos_argumentos(argv, etapa):
     assert main.etapa_da_execucao(main.ler_argumentos(argv)) == etapa

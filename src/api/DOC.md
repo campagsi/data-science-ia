@@ -3,7 +3,8 @@
 ## 1. Objetivo
 
 A pasta `src/api` implementa a API responsavel por disponibilizar o dataset
-bruto de monitoramento ambiental. O arquivo `data_set.json` pertence a esta
+bruto de monitoramento ambiental. O arquivo `data_set.json.gz` (JSON compactado
+em gzip, para caber no limite de 100 MB por arquivo do GitHub) pertence a esta
 camada e e exposto por uma rota HTTP para que o pipeline de ingestao possa
 consumi-lo.
 
@@ -23,7 +24,7 @@ DatasetService
 DatasetRepository
     |
     v
-src/api/data_set.json
+src/api/data_set.json.gz
 ```
 
 Essa separacao evita que a rota HTTP leia diretamente o arquivo. O controller
@@ -38,8 +39,8 @@ repository conhece a forma de armazenamento do dataset.
 | `app.py` | Cria e configura a aplicacao FastAPI. |
 | `dataset_controller.py` | Define a rota HTTP do dataset e converte falhas em respostas HTTP. |
 | `dataset_service.py` | Coordena a consulta do dataset. |
-| `dataset_repository.py` | Abre, interpreta e valida a estrutura basica do JSON. |
-| `data_set.json` | Arquivo com os registros brutos de monitoramento ambiental. |
+| `dataset_repository.py` | Abre (descompactando quando `.gz`), interpreta e valida a estrutura basica do JSON. |
+| `data_set.json.gz` | Registros brutos de monitoramento ambiental, em JSON compactado com gzip. O JSON puro fica no `.gitignore`. |
 
 ## 3. Classe `DatasetRepository`
 
@@ -59,10 +60,11 @@ DatasetRepository(dataset_path: Path | None = None)
 
 #### Parametro
 
-- `dataset_path`: caminho opcional para o arquivo JSON.
+- `dataset_path`: caminho opcional para o arquivo JSON. Se terminar em `.gz`,
+  e lido como JSON compactado em gzip; caso contrario, como JSON puro.
 - Quando nenhum caminho e informado, o repository usa automaticamente
-  `data_set.json` localizado na mesma pasta do modulo, por meio de
-  `Path(__file__).with_name("data_set.json")`.
+  `data_set.json.gz` localizado na mesma pasta do modulo, por meio de
+  `Path(__file__).with_name("data_set.json.gz")`.
 
 O parametro opcional facilita testes unitarios, pois um arquivo temporario ou
 um dataset de teste pode ser injetado sem alterar o arquivo oficial da API.
@@ -85,7 +87,7 @@ os registros como uma lista de dicionarios.
 
 #### Fluxo do metodo
 
-1. Abre o arquivo com codificacao UTF-8.
+1. Abre o arquivo com codificacao UTF-8 (com `gzip.open` quando a extensao e `.gz`).
 2. Executa `json.load` para converter o JSON em objetos Python.
 3. Verifica se o resultado e uma lista.
 4. Retorna a lista de registros.
@@ -94,6 +96,8 @@ os registros como uma lista de dicionarios.
 
 - `FileNotFoundError`: convertido em `RuntimeError` com a mensagem
   `Dataset da API nao foi encontrado.`
+- `gzip.BadGzipFile`: convertido em `RuntimeError` com a mensagem
+  `Dataset da API possui gzip invalido.`
 - `json.JSONDecodeError`: convertido em `RuntimeError` com a mensagem
   `Dataset da API possui JSON invalido.`
 - Se o JSON for valido, mas tiver uma estrutura diferente de uma lista, o
@@ -313,7 +317,7 @@ from src.api import app
 
 ### `GET /api/v1/data-set`
 
-Retorna o conteudo bruto de `data_set.json`.
+Retorna o conteudo bruto de `data_set.json.gz`, ja descompactado.
 
 Resposta de sucesso: `200 OK`.
 
@@ -392,7 +396,7 @@ A ingestao monta a chamada para:
 ```
 
 `FONTE_DADOS` e obrigatoria: sem ela, `load_config()` falha antes da ingestao. O mesmo valor e gravado em `Leituras.fonte` (maximo de 100 caracteres).
-O pipeline nao le o arquivo `data_set.json` diretamente; o arquivo e usado
+O pipeline nao le o arquivo `data_set.json.gz` diretamente; o arquivo e usado
 somente por esta API, que precisa estar em execucao durante o pipeline.
 
 ## 11. Principios de organizacao aplicados
