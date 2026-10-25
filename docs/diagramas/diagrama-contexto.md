@@ -18,7 +18,7 @@ flowchart LR
 
 # Diagrama de contexto
 
-O sistema recebe registros ambientais exclusivamente da API REST configurada em `FONTE_DADOS`, que no ambiente atual serve um dataset simulado. O payload bruto é normalizado, os dados pessoais do operador são anonimizados e cada registro é validado. Os válidos são gravados no banco relacional (modelo 3FN); os recusados vão para o log de rejeitados. O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto. A análise estatística consulta o banco para gerar o relatório.
+O sistema recebe registros ambientais exclusivamente da API REST configurada em `FONTE_DADOS`, que no ambiente atual serve um dataset simulado. O payload bruto passa pelo Data Lake em `data_lake/`: a Bronze guarda o que atende o contrato, e na Silver o lote é normalizado, os dados pessoais do operador são anonimizados e cada registro é validado; a Gold prepara o modelo estrela do Power BI. Os válidos são gravados no banco relacional (modelo 3FN); os recusados vão para o log de rejeitados. A análise estatística consulta o banco para gerar o relatório.
 
 O agente analítico é uma camada de **leitura**: responde perguntas em linguagem natural com um LLM externo (API da OpenAI ou da Anthropic, conforme `AGENTE_LLM_FORNECEDOR`) que escolhe ferramentas Python. Essas ferramentas leem o banco com um usuário só de leitura e a documentação do projeto por RAG. O agente não grava nada no banco, e os dados pessoais dos operadores nunca chegam ao LLM. Detalhes em [agente/arquitetura.md](../agente/arquitetura.md).
 

@@ -3,7 +3,8 @@ Ferramentas do agente contra o SQL Server de teste, com o usuário só de leitur
 
 - POL-01: com sql/seguranca/agente_usuario_leitura.sql aplicado, o usuário
   agente_leitura lê as tabelas das ferramentas e não consegue gravar.
-- POL-02: o usuário não lê Operadores.
+- POL-02: de Operadores, o usuário lê só o código (não é dado pessoal); nome, CPF,
+  e-mail e município do operador são negados por coluna.
 - As ferramentas, executadas COMO o usuário do agente, devolvem os mesmos
   números de sql/queries_analiticas.sql.
 
@@ -99,10 +100,28 @@ def test_pol01_nao_grava_nem_altera_estrutura(como_agente, comando):
         como_agente.executar(comando)
 
 
-@pytest.mark.parametrize("consulta", ["SELECT TOP 1 * FROM dbo.Operadores", "SELECT COUNT(*) FROM dbo.Operadores"])
-def test_pol02_nao_le_operadores(como_agente, consulta):
+@pytest.mark.parametrize(
+    "consulta",
+    [
+        "SELECT TOP 1 * FROM dbo.Operadores",
+        "SELECT COUNT(*) FROM dbo.Operadores",
+        "SELECT nome_hash FROM dbo.Operadores",
+        "SELECT cpf_hash FROM dbo.Operadores",
+        "SELECT email_criptografado FROM dbo.Operadores",
+        "SELECT municipio_id FROM dbo.Operadores",
+    ],
+)
+def test_pol02_nao_le_dados_pessoais_de_operadores(como_agente, consulta):
     with pytest.raises(Exception, match=PERMISSAO_NEGADA):
         como_agente.fetch_all(consulta)
+
+
+def test_pol02_le_so_o_codigo_do_operador(como_agente):
+    """Decisão de 23/10/2026: o código do operador (não é dado pessoal) fica legível para o agente."""
+    operadores = ConsultaDados.do_banco(como_agente).operadores()
+
+    assert operadores and all(o["operador_codigo"].startswith("OP-") for o in operadores)
+    assert set(operadores[0]) == {"estacao_codigo", "operador_codigo", "primeira_leitura", "ultima_leitura", "leituras"}
 
 
 def test_ferramentas_como_agente_batem_com_as_consultas_analiticas(como_agente, banco_carregado, consultas_analiticas):

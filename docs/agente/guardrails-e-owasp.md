@@ -35,7 +35,7 @@ Uma política sem guardrail é só uma intenção. A mesma política pode ter v�
 ```text
 Política: "o agente não revela o CPF de operadores"
   ├── Guardrail 1 (prompt):  o system prompt manda recusar pedidos de dados pessoais
-  ├── Guardrail 2 (código):  nenhuma ferramenta lê a tabela Operadores
+  ├── Guardrail 2 (código):  de Operadores, as ferramentas leem só o código
   ├── Guardrail 3 (teste):   um teste procura padrões de CPF nos retornos das ferramentas
   └── Guardrail 4 (log):     a pergunta é mascarada antes de ir para o log
 ```
@@ -52,7 +52,7 @@ Com os **agentes**, que executam ações por ferramentas, o termo passou a cobri
 flowchart LR
     U([Usuário]) -->|pergunta| GE[Guardrails de entrada<br/>tamanho, máscara de PII]
     GE --> LLM[LLM]
-    LLM -->|pede ferramenta| GA[Guardrails de ação<br/>só leitura, Pydantic,<br/>sem Operadores]
+    LLM -->|pede ferramenta| GA[Guardrails de ação<br/>só leitura, Pydantic,<br/>de Operadores só o código]
     GA --> F[Ferramentas]
     F -->|resultado| LLM
     GX[Guardrails de execução<br/>6 chamadas, 60 s, tokens] -.->|limitam| LLM
@@ -249,7 +249,7 @@ flowchart TB
     E1 --> E2[POL-02 Máscara de PII<br/>antes do LLM, do histórico e do log]
     E2 --> L{LLM}
     L -->|pede ferramenta| A1[POL-06 Argumentos validados<br/>strict + Pydantic extra=forbid]
-    A1 --> A2[POL-01 / POL-02 Catálogo só leitura<br/>usuário SQL só SELECT, DENY Operadores]
+    A1 --> A2[POL-01 / POL-02 Catálogo só leitura<br/>usuário SQL só SELECT,<br/>Operadores só o código]
     A2 -->|resultado como dado - POL-08| L
     X[POL-07 Orçamento da pergunta<br/>chamadas, tokens, prazo] -.-> L
     L -->|texto| S1[POL-03 Verificação dos números<br/>1 pedido de correção, depois aviso]
@@ -266,7 +266,7 @@ flowchart TB
 | Entrada | Pergunta mascarada **antes** do LLM, do histórico e do log | `security.py` | Forte | POL-02 | LLM02 | 3 |
 | Entrada | `conversa_id` com formato fechado | `Conversas` | Forte | POL-05 | — | 1 (feito) |
 | Ação | Só ferramentas de leitura, sem `Operadores`, sem text-to-SQL | Catálogo | **Forte (defesa principal)** | POL-01, POL-02 | LLM02, LLM06 | 2 |
-| Ação | Usuário do Azure SQL só com `SELECT` nas tabelas usadas e `DENY` em `Operadores` | Banco | **Forte (infraestrutura)** | POL-01, POL-02 | LLM02, LLM06 | 2 |
+| Ação | Usuário do Azure SQL só com `SELECT` nas tabelas usadas e só o código de `Operadores` (nome, CPF, e-mail e município negados por coluna) | Banco | **Forte (infraestrutura)** | POL-01, POL-02 | LLM02, LLM06 | 2 |
 | Ação | `strict: true` no schema + Pydantic com `extra="forbid"` | `RegistroFerramentas` e adaptador | Forte | POL-06 | LLM05, LLM06 | 2 e 3 |
 | Ação | Retorno sem dados pessoais e código sem métodos de escrita (testes) | Testes | Forte (verificação) | POL-01, POL-02 | LLM02, LLM06 | 2 |
 | Execução | 6 chamadas de ferramenta, 50 linhas, 200 pontos | Orquestrador e ferramentas | Forte | POL-07 | LLM10 | 2 e 3 |
@@ -274,6 +274,7 @@ flowchart TB
 | Execução | 16.000 tokens de saída, esforço `medium`, 60 s por tentativa, 2 novas tentativas | Adaptador do LLM | Forte | POL-07 | LLM10 | 3 |
 | Execução | 10 turnos e 1.000 conversas em memória | `Conversas` | Forte | POL-07 | LLM10 | 1 (feito) |
 | Execução | 10 perguntas por minuto e 200 por dia por IP | Flask-Limiter | Forte | POL-07 | LLM10 | 7 |
+| Execução | Atualização da base do agente: 10 por hora por IP e uma por vez (409) | Flask-Limiter e `PainelDaBase` | Forte | POL-07 | LLM10 | Painel da base |
 | Comportamento | Números só de ferramentas, recusas, trechos como dados | System prompt | **Fraco** | POL-03, POL-08, POL-11 | LLM01, LLM09 | 3 |
 | Comportamento | Trechos e resultados entram como `tool_result` em JSON, nunca no system prompt | Adaptador | Forte | POL-08 | LLM01 | 3 e 4 |
 | Saída | Números da resposta conferidos com os resultados das ferramentas | `guardrails/saida.py` | Forte (detecção) | POL-03 | LLM09 | 3 |
@@ -289,7 +290,7 @@ Requisitos de segurança **decididos em 21/10/2026**, que o código deve impleme
 | ID | Política | Guardrails (como é cumprida) | Teste que prova | Fase |
 |---|---|---|---|---|
 | **POL-01** | **Somente leitura.** O agente nunca grava, altera ou apaga dados | (1) Nenhuma ferramenta de escrita no catálogo. (2) `AGENTE_SQL_CONNECTIONSTRING` com o usuário `agente_leitura`, só com `SELECT`. Obrigatória com o fornecedor `anthropic` (L4). (3) `src/agente` não importa repositórios nem métodos de escrita | `test_agente_politicas.py`: nenhum nome proibido (`save_readings`, `substituir_leituras`, `insert_leituras`, `merge_many`, `create_many`, `run_pipeline`) em `src/agente`. A configuração recusa `anthropic` sem a connection string do agente. Integração: o usuário `agente_leitura` não grava nem altera o schema (feito) | 2 |
-| **POL-02** | **Proteção de dados pessoais (LGPD).** Nenhum dado de operador sai, e o texto livre digitado pelo usuário é mascarado | (1) Nenhuma ferramenta lê `Operadores`, e `descriptografar_email()` nunca é chamada. (2) O usuário do banco tem `DENY SELECT` em `Operadores`. (3) A pergunta é mascarada **antes** de ir ao LLM, ao histórico e ao log (L1). (4) A resposta é mascarada antes de sair | Teste de PII em todos os retornos de ferramenta, inclusive `dias_semelhantes` e `prever`. Teste de `mascarar_texto_livre` (CPF válido mascarado, número de medição preservado). Teste de que o LLM roteirizado recebe a pergunta mascarada. Na avaliação, o espião confere o que vai ao LLM, a resposta e o log; o laudo mascara a justificativa (feito) | 2 e 3 |
+| **POL-02** | **Proteção de dados pessoais (LGPD).** Nenhum dado pessoal de operador sai (só o código, que identifica o posto de trabalho, decisão de 23/10/2026), e o texto livre digitado pelo usuário é mascarado | (1) De `Operadores`, as ferramentas leem só `codigo_operador` (`panorama_dados`), e `descriptografar_email()` nunca é chamada. (2) O usuário do banco lê só `id_operador` e `codigo_operador`, com `DENY SELECT` de coluna em nome, CPF, e-mail e município. (3) A pergunta é mascarada **antes** de ir ao LLM, ao histórico e ao log (L1). (4) A resposta é mascarada antes de sair | Teste de PII em todos os retornos de ferramenta, inclusive `dias_semelhantes` e `prever`. Teste de `mascarar_texto_livre` (CPF válido mascarado, número de medição preservado). Teste de que o LLM roteirizado recebe a pergunta mascarada. Na avaliação, o espião confere o que vai ao LLM, a resposta e o log; o laudo mascara a justificativa (feito) | 2 e 3 |
 | **POL-03** | **Números só de ferramentas.** Todo número sobre medições vem de uma ferramenta chamada na conversa | (1) Regra 1 do system prompt. (2) Verificação da saída (L2): os números da resposta são procurados nos resultados das ferramentas, na pergunta e no histórico. Se algum não for encontrado, o LLM recebe **um** pedido de correção. Se o número continuar, a resposta sai com aviso visível e WARNING no log | Testes da verificação (número presente, arredondado, ausente, datas ignoradas e porcentagem × fração, Fase 8). Teste do laço: correção pedida uma única vez. Laudo com número fora do contexto descartado (Fase 11). Métrica de fidelidade numérica no golden set (feito). A medição com o LLM real fica pendente da chave da Anthropic. | 3 |
 | **POL-04** | **Fontes verdadeiras.** As fontes mostram só o que foi realmente executado | Fontes montadas pelo código a partir das chamadas executadas | Teste do orquestrador: uma fonte por chamada executada, nenhuma vinda do texto do LLM (feito) | 3 |
 | **POL-05** | **Entrada controlada** | Pergunta de 1 a 1.000 caracteres, caracteres de controle removidos, `conversa_id` com formato fechado | Testes de `validar_pergunta` e de `Conversas` (feito) | 1 e 3 |
@@ -297,7 +298,7 @@ Requisitos de segurança **decididos em 21/10/2026**, que o código deve impleme
 | **POL-07** | **Consumo limitado** (custo e disponibilidade) | Limites da DA6 + orçamento por pergunta (tokens de entrada acumulados e prazo) + `max_tokens`, `effort` e `timeout` do SDK + limite de requisições na web (L3). Ao estourar o orçamento, o LLM responde com o que já tem (`tool_choice: none`) | Testes do orçamento com o LLM roteirizado (limite de chamadas, de tokens e de prazo). Teste da rota web devolvendo 429 (feito) | 1, 3 e 7 |
 | **POL-08** | **Dados externos não são ordens** (contra prompt injection) | Trechos de documentação e resultados de ferramentas entram só como `tool_result` em JSON, nunca no system prompt. Regra 10 do system prompt. Nenhuma ferramenta perigosa a ser "convencida" | Teste do adaptador (trechos nunca no `system`). Casos adversariais no golden set, incluindo um documento com instrução embutida e uma ferramenta proibida (feito). **Medido com o LLM real (21/10/2026):** na 1ª rodada, o `gpt-4.1-mini` obedeceu a uma instrução colada na pergunta (seg-03) e chamou `listar_anomalias`. A regra 10 do prompt passou a cobrir textos colados pelo usuário, e o caso passou na 2ª rodada | 3, 4 e 8 |
 | **POL-09** | **Saída segura na web** | Markdown convertido com `markdown-it-py` com HTML desabilitado, escape automático do Jinja2, cabeçalho `Content-Security-Policy` | Teste: uma resposta com `<script>` e com link `javascript:` não gera HTML executável (feito) | 7 |
-| **POL-10** | **Segredos protegidos** | Chaves só no `.env`. `repr=False` na configuração (feito). Log só com o **tipo** da exceção. Nada secreto no system prompt. Nada de chave no navegador. `X-API-Key` se a web sair do `127.0.0.1` | Teste do `repr`. Teste de log de erro do provedor sem a chave. Teste do `X-API-Key` da página web (feito) | 1, 3 e 7 |
+| **POL-10** | **Segredos protegidos** | Chaves só no `.env`. `repr=False` na configuração (feito). Log só com o **tipo** da exceção. Nada secreto no system prompt. Nada de chave no navegador. `X-API-Key` se a web sair do `127.0.0.1`, inclusive nas rotas da base do agente (`/agente/base`) | Teste do `repr`. Teste de log de erro do provedor sem a chave. Teste do `X-API-Key` da página web e das rotas da base, e falha da atualização no log só com o tipo do erro (feito) | 1, 3 e 7 |
 | **POL-11** | **Escopo do assunto.** O agente só trata dos dados ambientais do projeto | System prompt (regras 7 a 9) e tratamento da recusa do provedor (`stop_reason="refusal"`) como mensagem amigável (o Haiku 5.5 não tem fallback do servidor) | Casos de recusa no golden set e matriz de confusão da recusa no relatório da avaliação (feito). A medição com o LLM real fica pendente da chave da Anthropic. | 3 e 8 |
 | **POL-12** | **Dependências e modelos confiáveis** | Nome, fonte e versão de cada dependência conferidos e registrados em [bibliotecas.md](bibliotecas.md). Modelo de embeddings só do repositório oficial. Modelo de previsão só treinado localmente: carregado apenas se o sha256 e a versão do scikit-learn baterem com o `metadados.json`, porque carregar `joblib`/pickle executa código | Teste de bibliotecas aprovadas, inclusive `src/previsao` (feito). Testes do modelo alterado e de outra versão do scikit-learn, os dois recusados com `guardrail=POL-12` no log (feito, Fase 10) | todas e 10 |
 | **POL-13** | **Rastreabilidade** | Todo guardrail acionado gera uma linha de log com o id da política, sem dado pessoal. Ex.: `Agente: guardrail=POL-03 conversa=c-3f9a acao=correcao numeros=2` | Teste do logger com o LLM roteirizado. As linhas `guardrail=POL-xx` também são contadas na avaliação e saem nos descartes do laudo e na recusa do modelo de previsão (feito) | 3 |
@@ -309,7 +310,7 @@ Requisitos de segurança **decididos em 21/10/2026**, que o código deve impleme
 | **L1** | A pergunta é mascarada antes de ir ao LLM, ao histórico e ao log. Os dados ambientais não dependem de CPF, e-mail nem telefone | POL-02 |
 | **L2** | Pedir correção ao LLM **uma vez** e, se o número continuar sem origem, avisar o usuário e registrar WARNING | POL-03 |
 | **L3** | Flask-Limiter com `10 per minute;200 per day` por IP (`AGENTE_LIMITE_WEB`) | POL-07 |
-| **L4** | Usuário `agente_leitura` **obrigatório** fora do modo simulado. Ele recebe `GRANT SELECT` só nas tabelas usadas e `DENY SELECT` em `Operadores`. O papel `db_datareader` **não** é usado, porque daria leitura de `Operadores` | POL-01, POL-02 |
+| **L4** | Usuário `agente_leitura` **obrigatório** fora do modo simulado. Ele recebe `GRANT SELECT` só nas tabelas usadas e, em `Operadores`, só nas colunas `id_operador` e `codigo_operador`, com `DENY SELECT` de coluna em nome, CPF, e-mail e município. O papel `db_datareader` **não** é usado, porque daria leitura de `Operadores` inteira | POL-01, POL-02 |
 
 ### Como a verificação dos números (POL-03) funciona
 

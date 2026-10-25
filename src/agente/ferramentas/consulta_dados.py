@@ -70,7 +70,7 @@ class ConsultaDados:
     Leitura dos dados com validação de códigos e cache.
 
     Args:
-        leituras: repositório de medições (get_medicoes, get_cobertura).
+        leituras: repositório de medições (get_medicoes, get_cobertura, get_operadores, get_assinatura).
         estacoes: repositório de estações (get_all, get_by_codigo).
         municipios: repositório de municípios (get_com_estacoes).
         parametros: repositório de parâmetros (get_all).
@@ -223,6 +223,19 @@ class ConsultaDados:
     def cobertura(self) -> list[dict]:
         """Período coberto e quantidade de leituras por estação (LeituraRepository.get_cobertura)."""
         return self.__em_cache(("cobertura",), self.__leituras.get_cobertura)
+
+    def operadores(self) -> list[dict]:
+        """Códigos dos operadores por estação, sem dado pessoal (LeituraRepository.get_operadores)."""
+        return self.__em_cache(("operadores",), self.__leituras.get_operadores)
+
+    def assinatura(self) -> dict:
+        """
+        Assinatura do conteúdo das medições (LeituraRepository.get_assinatura).
+
+        Sem cache: é ela que diz se os dados mudaram desde a última atualização
+        da base do agente (src/agente/manutencao.py).
+        """
+        return self.__leituras.get_assinatura()
 
     def limpar_cache(self) -> None:
         """Esquece tudo o que está em cache (ex.: depois de uma nova ingestão)."""

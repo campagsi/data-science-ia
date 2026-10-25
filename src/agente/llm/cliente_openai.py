@@ -137,8 +137,8 @@ class ClienteOpenAI:
         Example:
             >>> llm = ClienteOpenAI("chave", "gpt-4.1-mini", cliente=object())
             >>> p = llm.parametros_do_pedido("system", [Mensagem.usuario("oi")], [{"name": "x", "description": "d", "input_schema": {"type": "object"}}], False)
-            >>> p["messages"][0], p["tool_choice"], "reasoning_effort" in p
-            ({'role': 'system', 'content': 'system'}, 'none', False)
+            >>> p["messages"][0], p["tool_choice"], "reasoning_effort" in p, p["temperature"]
+            ({'role': 'system', 'content': 'system'}, 'none', False, 0)
         """
         parametros: dict[str, Any] = {
             "model": self.modelo,
@@ -147,6 +147,11 @@ class ClienteOpenAI:
         }
         if self.modelo.startswith(_PREFIXOS_RACIOCINIO) and "chat" not in self.modelo:
             parametros["reasoning_effort"] = self.esforco
+        else:
+            # Por quê: com temperatura 0, a mesma pergunta leva à mesma escolha de ferramenta
+            # e a quase a mesma resposta (o padrão, 1,0, variava entre recusar e responder).
+            # Os modelos de raciocínio não aceitam o parâmetro.
+            parametros["temperature"] = 0
         if ferramentas:
             parametros["tools"] = ferramentas_para_openai(ferramentas)
             parametros["tool_choice"] = "auto" if permitir_ferramentas else "none"

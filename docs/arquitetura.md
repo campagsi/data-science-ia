@@ -74,7 +74,7 @@ Os repositórios recebem a `DatabaseConnection` que devem usar. Assim, `save_rea
 `main.py` coordena o fluxo:
 
 - `iniciar_aplicacao()`: logs → configuração → segurança;
-- `run_pipeline()`: coleta → normalização → parâmetros → validação → log de rejeitados → gravação no banco → resumo (`python main.py --ingestao`). O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
+- `run_pipeline()` (`python main.py --ingestao`): coleta → **parte A, data lake** (`_processar_no_data_lake()`: Bronze com o contrato → Silver com deduplicação, normalização, anonimização, parâmetros e validação → Gold) → **parte B, banco relacional** (`_gravar_no_banco()`: log de rejeitados → filtro dos válidos → gravação idempotente) → resumo. A parte B usa o resultado da validação feita na Silver, sem refazer o tratamento;
 - `gerar_relatorio()`: análise estatística das medições gravadas, relatório em `INFO` e cada anomalia em `WARNING` (`python main.py --analise [--estacao] [--inicio] [--fim]`);
 - sem argumentos, `main.py` abre a CLI de consulta (`src/cli`).
 

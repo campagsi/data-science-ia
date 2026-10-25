@@ -47,9 +47,12 @@ BASE_CALCULO = "limites IQR e Z-Score calculados sobre o recorte pedido"
 
 DESCRICAO_PANORAMA = (
     "Mostra as estações monitoradas (código, nome, município e UF), o período coberto por cada uma "
-    "(primeira e última leitura), a quantidade de leituras, o intervalo médio entre leituras e quantos "
-    "parâmetros estão cadastrados. Use primeiro em perguntas vagas ('que dados você tem?') ou para saber "
-    "se existe dado num período. Não traz valores medidos: para isso use resumo_estatistico."
+    "(primeira e última leitura), a quantidade de leituras, o intervalo médio entre leituras, os CÓDIGOS "
+    "dos operadores que registraram leituras em cada estação (com período e quantidade) e quantos "
+    "parâmetros estão cadastrados. Use primeiro em perguntas vagas ('que dados você tem?'), para saber se "
+    "existe dado num período ou para 'quem opera a estação?'. O código do operador (ex.: OP-RJ-001) não é "
+    "dado pessoal; nome, CPF e e-mail não ficam disponíveis (LGPD). Não traz valores medidos: para isso "
+    "use resumo_estatistico."
 )
 DESCRICAO_PARAMETROS = (
     "Lista os parâmetros medidos com código, nome, unidade e faixa válida (faixa_minima e faixa_maxima; "
@@ -127,20 +130,37 @@ def panorama_dados(consulta: ConsultaDados, argumentos: SemArgumentos) -> dict:
     O intervalo médio entre leituras sai da própria cobertura:
     (última - primeira) / (leituras - 1), sem carregar as medições.
 
+    Os operadores aparecem só pelo código (POL-02): o código identifica o posto
+    de trabalho, e nome, CPF e e-mail ficam protegidos no banco e fora do alcance
+    do usuário do agente.
+
     Args:
         consulta: acesso aos dados.
         argumentos: nenhum.
 
     Returns:
-        {"estacoes": [...], "parametros_cadastrados": n}.
+        {"estacoes": [{..., "operadores": [{"codigo", "primeira_leitura", "ultima_leitura", "leituras"}]}],
+        "parametros_cadastrados": n}.
 
     Example:
         >>> from src.agente.ferramentas.dados_exemplo import consulta_de_exemplo
         >>> estacao = panorama_dados(consulta_de_exemplo(), SemArgumentos())["estacoes"][0]
         >>> estacao["codigo"], estacao["leituras"], estacao["intervalo_medio_minutos"]
         ('EST-1', 4, 60)
+        >>> [(o["codigo"], o["leituras"]) for o in estacao["operadores"]]
+        [('OP-1', 4)]
     """
     cobertura = {c["estacao_codigo"]: c for c in consulta.cobertura()}
+    operadores: dict[str, list[dict]] = {}
+    for linha in consulta.operadores():
+        operadores.setdefault(linha["estacao_codigo"], []).append(
+            {
+                "codigo": linha["operador_codigo"],
+                "primeira_leitura": linha["primeira_leitura"],
+                "ultima_leitura": linha["ultima_leitura"],
+                "leituras": linha["leituras"],
+            }
+        )
     estacoes = []
     for estacao in consulta.estacoes():
         dados = cobertura.get(estacao["codigo"], {})
@@ -156,6 +176,7 @@ def panorama_dados(consulta: ConsultaDados, argumentos: SemArgumentos) -> dict:
                 "ultima_leitura": dados.get("ultima_leitura"),
                 "leituras": leituras,
                 "intervalo_medio_minutos": intervalo,
+                "operadores": operadores.get(estacao["codigo"], []),
             }
         )
     return {"estacoes": estacoes, "parametros_cadastrados": len(consulta.parametros())}

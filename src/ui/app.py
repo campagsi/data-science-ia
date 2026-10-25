@@ -116,11 +116,11 @@ def limpar_cache() -> None:
     cache.limpar()
 
 
-def create_app(fabrica_agente=None) -> Flask:
-    """Aplicação do dashboard; fabrica_agente substitui a montagem do agente (testes)."""
+def create_app(fabrica_agente=None, painel_agente=None) -> Flask:
+    """Aplicação do dashboard; fabrica_agente e painel_agente substituem o agente e a base dele (testes)."""
     application = Flask(__name__)
     application.jinja_env.filters.update(FILTROS_TEMPLATE)
-    registrar_agente(application, fabrica_agente)
+    registrar_agente(application, fabrica_agente, painel_agente)
 
     def carregar() -> tuple[list[dict[str, Any]], bool]:
         try:
@@ -323,6 +323,9 @@ def create_app(fabrica_agente=None) -> Flask:
             iniciar_aplicacao("ingestao")
             resumo = run_pipeline()
             limpar_cache()
+            # O painel da base do agente recalcula a situação, e o agente da web é
+            # montado de novo na próxima pergunta (sem o cache de 5 min das consultas).
+            application.extensions["base_agente"].dados_mudaram()
             return jsonify({"ok": True, "resumo": resumo})
         except Exception as error:
             application.logger.exception("Falha na ingestao iniciada pelo dashboard.")

@@ -195,7 +195,7 @@ O `transform.py` do exemplo usa outro mecanismo, uma marca `status_pipeline = 'C
 
 ### No Data Lake
 
-O Data Lake não será implementado neste projeto (decisão de 06/10/2026).
+O Data Lake não será implementado nesta parte (decisão de 06/10/2026). **Atualização (25/10/2026):** o Data Lake foi integrado ao `run_pipeline()` em outra frente (`src/ingestion/extracao_dados.py`); a Silver passou a fazer o tratamento e a validação usados pelo banco. O código do Data Lake continua fora do escopo desta parte.
 
 ### Critério de aceite
 
@@ -657,3 +657,14 @@ Cada fase do [TODO](todo-idempotencia.md) registra aqui: alterações realizadas
 - **Configuração:** `CHAVE_API_BI` e `DIRETORIO_GOLD` (opcionais) em `.env.example`; `pyarrow` (leitura de Parquet) e `httpx2` (`TestClient` do FastAPI) em `requirements.txt`.
 - **Teste pelo dashboard:** página `/api-bi` no Flask (`src/ui/api_bi.py`, `src/ui/templates/api_bi.html`, `src/ui/static/api-bi.js`, link no menu lateral). `GET /api-bi/status`, chamado ao abrir a página, consulta `/health` e, com a API no ar, todas as rotas (a fato com uma linha), informando se a Gold tem dados e o total de medições; com a Gold vazia, a página orienta a executar a ingestão; `GET /api-bi/consulta` executa uma rota com filtros e devolve status, tempo, total, paginação, colunas e as primeiras 20 linhas. A chamada é feita pelo servidor no endereço de `FONTE_DADOS`, com `CHAVE_API_BI` no header: a chave não chega ao navegador e não há CORS entre as portas 5000 e 8000. API fora do ar, `401`, `422` e `503` aparecem com o detalhe devolvido.
 - **Testes:** `tests/unit/test_api_bi.py` (cache, Gold ausente ou corrompida, serialização, paginação, filtros, agregado, chave de API e registro no app): `21 passed`. `tests/unit/test_ui_api_bi.py` (repasse de filtros, header da chave, erros e verificação geral) e rotas da página em `tests/unit/test_ui_app.py`: `33 passed`. Conferido também ponta a ponta, com Uvicorn e Flask rodando e a chave ativa. A suíte completa mantém as falhas já existentes na `main`, vindas do Data Lake (`test_main.py`, `test_extracao_dados.py`, `test_logger.py`), sem nenhuma nova.
+
+### Ajuste — `run_pipeline()` organizado em data lake e banco (25/10/2026)
+
+- **Motivo:** depois da integração do data lake, o `main.py` ficou com as etapas antigas comentadas (normalização, parâmetros, estados e validação), que já rodavam dentro da Silver. A variável `normalized_data_silver` guardava, na verdade, o resultado da validação. Lendo o arquivo, parecia que a validação tinha sido desligada. Os testes de `test_main.py` também tinham parado (14 erros).
+- **`main.py`:** `run_pipeline()` faz só a coleta e o resumo, e chama duas funções com o fluxo comentado passo a passo:
+  - `_processar_no_data_lake()` (parte A): Bronze (contrato e log dos recusados), Silver (deduplicação, normalização, anonimização, parâmetros e validação) e Gold. Devolve o resultado da validação e os parâmetros aceitos;
+  - `_gravar_no_banco()` (parte B): log de rejeitados, filtro dos válidos e `save_readings()`.
+  O código comentado e o `# Extracao_Dados("test").execute()` saíram. **O comportamento não mudou:** mesma ordem, mesmas chamadas e mesmo resumo. A conexão com o banco passou a ser criada dentro da parte B, logo antes de gravar (o construtor de `DatabaseConnection` não abre conexão).
+- **Data lake:** `src/ingestion/extracao_dados.py` não foi alterado (fora do escopo desta parte). Os comentários do `main.py` só descrevem o que cada camada faz.
+- **Testes:** `tests/unit/test_main.py` passou a usar um módulo falso no lugar de `src.ingestion.extracao_dados` (o real chama a API na importação), com a ordem Bronze → Silver → Gold → banco, o resumo fechando com o recebido (`3 = 1 + 1 + 1`), os recusados no contrato e na validação no log de rejeitados e a falha em cada camada sem chegar ao banco: `46 passed`. Suíte sem `test_extracao_dados.py` (que não é coletado com a API parada): `1124 passed, 43 skipped`, com 2 falhas que não vêm desta mudança (`test_logger.py::test_resultados_da_validacao_viram_linhas_e_contagens`, que também falha no código anterior, e `test_agente_vetores.py::...[chroma]`, que passa quando roda sozinho).
+- **Documentação:** README, `arquitetura.md`, `manual-execucao.md`, `plano-testes.md` e os diagramas de contexto, atividade e sequência deixaram de dizer que o data lake não está integrado e passaram a mostrar as partes A e B.

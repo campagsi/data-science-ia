@@ -2,7 +2,7 @@
 
 Pipeline acadêmico para ingestão de leituras de estações ambientais, validação de qualidade, persistência relacional e análise de anomalias. Este README reúne a arquitetura, o dicionário de dados, a instalação e o runbook para operar a implementação atual.
 
-O enunciado do projeto final está em [docs/projeto_final.pdf](docs/projeto_final.pdf). A implementação atual deste repositório é a Parte 2: API REST, pipeline Python e banco relacional Azure SQL. O Data Lake (Bronze, Silver e Gold) é parte da arquitetura-alvo descrita no enunciado, mas ainda não está integrado ao `main.py`.
+O enunciado do projeto final está em [docs/projeto_final.pdf](docs/projeto_final.pdf). A implementação atual deste repositório é a Parte 2: API REST, pipeline Python e banco relacional Azure SQL. A ingestão também grava o Data Lake (Bronze, Silver e Gold) em `data_lake/`, e é na Silver que o lote é tratado e validado antes de ir para o banco.
 
 ## Índice
 
@@ -58,21 +58,24 @@ flowchart LR
     F --> G[Gold: dados preparados para consumo analítico]
 ```
 
-Bronze deve guardar o conteúdo aprovado pelo contrato sem normalizar ou anonimizar, com metadados de ingestão e política append-only. Como pode conter dados pessoais em claro, requer acesso restrito e retenção controlada. Silver deve conter dados limpos, deduplicados e protegidos. A organização de Gold deve seguir os produtos analíticos definidos para a entrega. Essas camadas ainda não são gravadas pelo pipeline existente; a pasta `data_lake/` é apenas estrutura de diretórios.
+Bronze deve guardar o conteúdo aprovado pelo contrato sem normalizar ou anonimizar, com metadados de ingestão. Como pode conter dados pessoais em claro, requer acesso restrito e retenção controlada (por isso `data_lake/` fica fora do Git). Silver deve conter dados limpos, deduplicados e protegidos. A organização de Gold deve seguir os produtos analíticos definidos para a entrega.
 
 ### Pipeline de ingestão existente
 
-Ao executar `python main.py --ingestao`, `run_pipeline()`:
+Ao executar `python main.py --ingestao`, `run_pipeline()` coleta o lote em `GET {FONTE_DADOS}/api/v1/data-set` e o passa por duas partes, nesta ordem:
 
-1. Busca o lote em `GET {FONTE_DADOS}/api/v1/data-set`.
-2. Normaliza os registros: limpa textos, converte tipos e organiza medições em `itens`.
-3. Protege os dados pessoais: CPF e nome viram hashes; e-mail é criptografado com Fernet.
-4. Cadastra parâmetros novos quando encontrados.
-5. Valida completude, faixas, referências e unicidade.
-6. Registra rejeições sem incluir dados pessoais nos logs.
-7. Grava registros aceitos no Azure SQL dentro da transação do lote.
+**Parte A, data lake** (`_processar_no_data_lake()`, que usa `src/ingestion/extracao_dados.py`):
 
-`ValidationService.validate_data()` recebe **registros normalizados**. Ele não valida sozinho a estrutura do JSON bruto. O módulo `src/services/data_contract_service.py` contém a função estrutural independente `validar_contrato()`, mas ela ainda não está conectada ao `run_pipeline()`.
+1. Bronze: confere cada registro pelo contrato (`ValidationService.validar_contrato()`); os aceitos vão como chegaram para `data_lake/bronze/dados_bronze.json` e os recusados para o log de rejeitados.
+2. Silver: remove `registro_codigo` repetido, normaliza e anonimiza (CPF e nome viram hash, e-mail é criptografado com Fernet), cadastra parâmetros novos e valida cada registro (completude, faixas, referências e unicidade). Os válidos vão para `data_lake/silver/dados_silver.parquet`.
+3. Gold: dimensões e fato em `data_lake/gold/`, consumidas pela API do Power BI.
+
+**Parte B, banco relacional** (`_gravar_no_banco()`):
+
+4. Registra as rejeições da validação, sem dados pessoais nos logs.
+5. Grava só os registros válidos no Azure SQL, na transação do lote.
+
+A parte B não refaz o tratamento: ela usa o resultado da validação feita na Silver. O fluxo comentado passo a passo está no próprio `main.py`.
 
 ## Dicionário de dados
 
@@ -272,7 +275,7 @@ Get-Content (Get-ChildItem logs\pipeline_*.log | Sort-Object LastWriteTime | Sel
 Get-Content (Get-ChildItem logs\rejeitados_*.log | Sort-Object LastWriteTime | Select-Object -Last 1) -Tail 30
 ```
 
-O log de rejeitados não deve conter CPF, nome, e-mail, hashes, tokens ou segredos. A carga relacional é idempotente: reexecutar o mesmo período substitui as leituras da partição estação + dia, em vez de duplicá-las. O pipeline atual grava no banco, não em Bronze/Silver/Gold.
+O log de rejeitados não deve conter CPF, nome, e-mail, hashes, tokens ou segredos. A carga relacional é idempotente: reexecutar o mesmo período substitui as leituras da partição estação + dia, em vez de duplicá-las. A mesma execução também regrava os arquivos Bronze, Silver e Gold em `data_lake/`.
 
 ### 5. Analisar dados
 
@@ -345,7 +348,7 @@ Não execute testes de integração contra o banco de produção. Consulte [docs
 
 ```text
 Data-Science-Ia/
-├── data_lake/             # pastas Bronze/Silver/Gold; persistência ainda não integrada
+├── data_lake/             # arquivos Bronze/Silver/Gold gravados pela ingestão; fora do Git
 ├── docs/                   # requisitos, arquitetura, runbook, contratos e diagramas
 ├── data/agente/            # índices vetoriais, modelo de embeddings e modelo de previsão; fora do Git
 ├── logs/                   # logs de execução e rejeitados; fora do Git
@@ -355,7 +358,7 @@ Data-Science-Ia/
 │   ├── api/                # API FastAPI: dataset de ingestão e camada Gold para o Power BI
 │   ├── cli/                # consulta interativa, exportação e chat do agente
 │   ├── database/           # conexão e transações com Azure SQL
-│   ├── ingestion/          # cliente HTTP e importação relacional
+│   ├── ingestion/          # cliente HTTP, camadas do data lake e importação relacional
 │   ├── models/             # modelos das entidades
 │   ├── previsao/           # modelo de previsão de curto prazo (treinado fora do chat)
 │   ├── repository/         # persistência por entidade

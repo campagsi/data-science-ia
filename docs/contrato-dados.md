@@ -165,4 +165,4 @@ Formato das linhas de log: seção 6 de [analise-implementacao.md](analise-imple
 5. CPF, nome e e-mail nunca são gravados em claro no banco nem no log.
 6. Todo registro recebido termina em exatamente um destino: gravado (válido) ou no log de rejeitados.
 
-O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
+O Data Lake (Bronze, Silver e Gold) foi integrado à ingestão em outra frente: a normalização e a validação acima rodam na camada Silver, e o banco recebe o resultado delas (fluxo em [diagramas/diagrama-sequencia.md](diagramas/diagrama-sequencia.md)).

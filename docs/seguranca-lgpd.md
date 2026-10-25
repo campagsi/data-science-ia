@@ -15,7 +15,7 @@ Item 3.7: logs estruturados com data/hora, severidade (INFO, WARNING, ERROR) e m
 | `operador_cpf` | Anonimização irreversível | SHA-256 | `Operadores.cpf_hash` |
 | `operador_nome_completo` | Anonimização irreversível | SHA-256 | `Operadores.nome_hash` |
 | `operador_email` | Criptografia reversível | Fernet (simétrica) | `Operadores.email_criptografado` (decisão D7, migration V002) |
-| `operador_codigo`, `estacao_codigo`, nomes de estação e coordenadas | Mantidos | — | Identificam equipamento e local, não pessoa; são necessários para os relacionamentos |
+| `operador_codigo`, `estacao_codigo`, nomes de estação e coordenadas | Mantidos | — | Identificam equipamento e local, não pessoa; são necessários para os relacionamentos. O agente analítico mostra só o `operador_codigo`, e o usuário do banco dele tem `DENY` nas colunas protegidas ([agente/guardrails-e-owasp.md](agente/guardrails-e-owasp.md), POL-02) |
 
 ## Módulo central: `src/security.py`
 

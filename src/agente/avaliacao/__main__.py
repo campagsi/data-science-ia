@@ -15,7 +15,7 @@ Três modos, do mais barato ao mais completo, para não gastar tokens à toa:
     --lote             uma chamada por pergunta, pela Batch API (metade do preço)
     (padrão)           o laço completo do agente, pergunta a pergunta
 
-Custo: a avaliação completa faz ~52 perguntas ao LLM (com o Haiku, na ordem de
+Custo: a avaliação completa faz ~53 perguntas ao LLM (com o Haiku, na ordem de
 US$ 0,50 a 1,00; o --lote custa metade e mede só a seleção). O --so-recuperacao
 não custa nada. O relatório vai para relatorios/ (fora do Git).
 

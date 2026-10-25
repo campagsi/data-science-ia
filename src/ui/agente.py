@@ -1,5 +1,6 @@
 """
-Interface web do agente analítico: GET /agente (página) e POST /agente/perguntar (JSON).
+Interface web do agente analítico: GET /agente (página), POST /agente/perguntar (JSON)
+e o painel da base do agente: GET /agente/base e POST /agente/base/atualizar.
 
 Conceito
 --------
@@ -23,6 +24,13 @@ O agente é montado só na primeira pergunta (criar_agente lê o .env). Sem
 configuração, a página abre e a pergunta responde 503 com uma mensagem amigável.
 O log usa a configuração já feita pelo servidor, sem chamar configurar_logs() de novo (ponto P6).
 
+Base do agente (src/agente/manutencao.py): o painel mostra se o índice da
+documentação, o índice dos dias e o modelo de previsão estão em dia, e só aceita
+atualizar o que está ausente ou desatualizado. A atualização roda em segundo
+plano, uma por vez, e ao terminar descarta o agente montado: a próxima pergunta
+monta um agente novo, com o índice e o modelo novos, sem reiniciar o servidor.
+As rotas seguem POL-10 (X-API-Key) e POL-07 (limite próprio de atualizações).
+
 Documentação: docs/agente/arquitetura.md § 11
 """
 from __future__ import annotations
@@ -41,6 +49,9 @@ from markdown_it import MarkdownIt
 from src.logger import logger
 
 LIMITE_PADRAO = "10 per minute;200 per day"
+# POL-07: cada atualização pode treinar o modelo (~1 min de CPU); poucas por hora bastam.
+LIMITE_ATUALIZACAO = "10 per hour"
+MENSAGEM_BASE_INDISPONIVEL = "Não foi possível verificar a base do agente. Consulte os logs."
 MENSAGEM_INDISPONIVEL = "O agente não está disponível agora. Tente de novo em alguns instantes."
 # POL-09: só recursos do próprio site; nada de script embutido, objeto ou moldura.
 POLITICA_CSP = (
@@ -63,7 +74,7 @@ def markdown_seguro(texto: str) -> str:
     return _MARKDOWN.render(texto)
 
 
-def registrar_agente(app: Flask, fabrica: Callable[[], Any] | None = None) -> None:
+def registrar_agente(app: Flask, fabrica: Callable[[], Any] | None = None, painel=None) -> None:
     """
     Registra as rotas do agente e o limite de requisições na aplicação.
 
@@ -71,10 +82,18 @@ def registrar_agente(app: Flask, fabrica: Callable[[], Any] | None = None) -> No
         app: aplicação Flask (create_app).
         fabrica: monta o Agente. None = src.agente.criar_agente (lê o .env).
             Os testes passam um agente com o LLM roteirizado.
+        painel: PainelDaBase da base do agente. None = o da configuração do .env.
+            Fica em app.extensions["base_agente"] para a ingestão avisar que os dados mudaram.
     """
     limite = os.getenv("AGENTE_LIMITE_WEB", "").strip() or LIMITE_PADRAO
     limiter = Limiter(get_remote_address, app=app, storage_uri="memory://", default_limits=[])
-    obter_agente = _agente_preguicoso(fabrica)
+    obter_agente, descartar_agente = _agente_preguicoso(fabrica)
+    if painel is None:
+        from src.agente.manutencao import painel_da_configuracao
+
+        painel = painel_da_configuracao()
+    painel.ao_concluir = descartar_agente
+    app.extensions["base_agente"] = painel
     rotas = Blueprint("agente", __name__)
 
     @rotas.get("/agente")
@@ -119,17 +138,52 @@ def registrar_agente(app: Flask, fabrica: Callable[[], Any] | None = None) -> No
             }
         )
 
+    @rotas.get("/agente/base")
+    def base_do_agente() -> tuple[Response, int] | Response:
+        """Situação do índice da documentação, do índice dos dias e do modelo, e o andamento da atualização."""
+        if not _chave_valida():
+            return jsonify({"erro": "chave de acesso ausente ou inválida (header X-API-Key)"}), 401
+        try:
+            return jsonify(painel.estado())
+        except Exception as erro:
+            # Cuidado (POL-10): só o tipo do erro, nunca a mensagem.
+            logger.error(f"Base do agente: não foi possível verificar erro={type(erro).__name__}")
+            return jsonify({"erro": MENSAGEM_BASE_INDISPONIVEL}), 503
+
+    @rotas.post("/agente/base/atualizar")
+    @limiter.limit(LIMITE_ATUALIZACAO)
+    def atualizar_base() -> tuple[Response, int]:
+        """Recebe {"itens": "todos"} ou {"itens": ["dias", "previsao"]} e começa a atualização (202)."""
+        if not _chave_valida():
+            return jsonify({"erro": "chave de acesso ausente ou inválida (header X-API-Key)"}), 401
+        corpo = request.get_json(silent=True)
+        if not isinstance(corpo, dict):
+            return jsonify({"erro": 'envie um JSON com o campo "itens"'}), 400
+        try:
+            codigo, mensagem = painel.iniciar(corpo.get("itens"))
+        except Exception as erro:
+            logger.error(f"Base do agente: não foi possível iniciar erro={type(erro).__name__}")
+            return jsonify({"erro": MENSAGEM_BASE_INDISPONIVEL}), 503
+        if codigo != 202:
+            return jsonify({"erro": mensagem}), codigo
+        return jsonify({"mensagem": mensagem, **painel.estado()}), 202
+
     @rotas.errorhandler(429)
     def limite_excedido(_erro) -> tuple[Response, int]:
         """POL-07: resposta JSON quando o limite de perguntas por IP é atingido."""
         logger.warning(f"Agente: guardrail=POL-07 acao=limite_web ip={get_remote_address()}")
+        if request.path == "/agente/base/atualizar":
+            return jsonify({"erro": f"limite de atualizações atingido ({LIMITE_ATUALIZACAO}); aguarde e tente de novo"}), 429
         return jsonify({"erro": f"limite de perguntas atingido ({limite}); aguarde e tente de novo"}), 429
 
     app.register_blueprint(rotas)
 
 
-def _agente_preguicoso(fabrica: Callable[[], Any] | None) -> Callable[[], Any]:
-    """Monta o agente na primeira chamada e reaproveita depois; None se a configuração falhar."""
+def _agente_preguicoso(fabrica: Callable[[], Any] | None) -> tuple[Callable[[], Any], Callable[[], None]]:
+    """
+    (obter, descartar): obter monta o agente na primeira chamada e reaproveita depois
+    (None se a configuração falhar); descartar faz a próxima chamada montar um novo.
+    """
     estado: dict[str, Any] = {}
     lock = threading.Lock()
 
@@ -150,7 +204,13 @@ def _agente_preguicoso(fabrica: Callable[[], Any] | None) -> Callable[[], Any]:
                     return None
             return estado["agente"]
 
-    return obter
+    def descartar() -> None:
+        """Esquece o agente montado (depois de atualizar a base ou de uma ingestão)."""
+        with lock:
+            if estado.pop("agente", None) is not None:
+                logger.info("Agente: agente da web descartado; a próxima pergunta monta um novo")
+
+    return obter, descartar
 
 
 def _chave_web() -> str:

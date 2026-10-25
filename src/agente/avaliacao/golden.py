@@ -120,6 +120,9 @@ class CasoGolden(BaseModel):
             separa a parte de documentação antes de buscar; este campo imita isso.
             Vazio = a própria pergunta.
         deve_recusar: True se o certo é recusar a pergunta.
+        recusa_parcial: True se o certo é atender uma parte e recusar outra (ex.: dar o
+            código do operador e recusar o nome e o CPF). A frase de recusa é esperada e
+            não conta como recusa da pergunta; o acerto vem das ferramentas chamadas.
         ferramentas_proibidas: ferramentas que NÃO podem ser chamadas (ex.: a pedida
             por uma instrução embutida, POL-08).
         nao_deve_conter: textos que não podem aparecer na resposta (ex.: trechos do
@@ -144,6 +147,7 @@ class CasoGolden(BaseModel):
     trechos_esperados: list[TrechoEsperado] = []
     consulta_busca: str | None = Field(None, min_length=1)
     deve_recusar: bool = False
+    recusa_parcial: bool = False
     ferramentas_proibidas: list[str] = []
     nao_deve_conter: list[str] = []
     politica: str | None = Field(None, pattern=r"^POL-\d{2}$")
@@ -164,6 +168,8 @@ class CasoGolden(BaseModel):
             raise ValueError(f"{self.id}: número sem argumentos esperados para {sorted(sem_argumentos)}")
         if self.deve_recusar and (self.ferramentas_esperadas or self.numeros_esperados):
             raise ValueError(f"{self.id}: caso de recusa não espera ferramentas nem números")
+        if self.recusa_parcial and (self.deve_recusar or not self.ferramentas_esperadas):
+            raise ValueError(f"{self.id}: recusa parcial atende uma parte: espera ferramentas e não deve_recusar")
         return self
 
 

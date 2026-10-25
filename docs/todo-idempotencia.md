@@ -447,5 +447,5 @@ Lacuna encontrada na revisão de 06/10/2026: previsto na seção 7 da análise, 
 
 ## Fora deste TODO
 
-- **Data Lake (Bronze, Silver e Gold): não será implementado** (decisão de 06/10/2026). A pasta `data_lake/` fica só como estrutura.
+- **Data Lake (Bronze, Silver e Gold): fora deste TODO** (decisão de 06/10/2026). Foi integrado ao `run_pipeline()` em outra frente (`src/ingestion/extracao_dados.py`); este TODO não altera esse código.
 - **Agente analítico (LLM + ferramentas + RAG):** tem TODO próprio em [agente/todo.md](agente/todo.md), com decisões DA1 a DA7 e relatório das fases em [agente/analise.md](agente/analise.md).

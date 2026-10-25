@@ -78,7 +78,7 @@ Os exemplos de retorno mostram o **formato**. Os valores são ilustrativos.
 
 ### 4.1 `panorama_dados` (Fase 2)
 
-**Objetivo:** dar ao LLM a "visão de cima": estações, período coberto e volume. Costuma ser a primeira ferramenta em perguntas vagas ou sobre datas.
+**Objetivo:** dar ao LLM a "visão de cima": estações, período coberto, volume e os códigos dos operadores de cada estação. Costuma ser a primeira ferramenta em perguntas vagas, sobre datas ou sobre "quem opera a estação".
 
 **Parâmetros:** nenhum.
 
@@ -88,12 +88,16 @@ Os exemplos de retorno mostram o **formato**. Os valores são ilustrativos.
 {
   "estacoes": [{"codigo": "EST-RJ-001", "nome": "Estação Integrada Guanabara Norte", "municipio": "Rio de Janeiro", "uf": "RJ",
                 "primeira_leitura": "2026-04-01T00:00:00", "ultima_leitura": "2026-10-23T23:30:00", "leituras": 9856,
-                "intervalo_medio_minutos": 30}],
+                "intervalo_medio_minutos": 30,
+                "operadores": [{"codigo": "OP-RJ-001", "primeira_leitura": "2026-04-01T00:00:00", "ultima_leitura": "2026-10-23T23:30:00", "leituras": 4928},
+                               {"codigo": "OP-RJ-002", "primeira_leitura": "2026-04-01T00:30:00", "ultima_leitura": "2026-10-23T23:00:00", "leituras": 4928}]}],
   "parametros_cadastrados": 11
 }
 ```
 
 **Implementação:** um método novo de leitura em `LeituraRepository`, `get_cobertura()`, com `MIN(data_hora)`, `MAX(data_hora)` e `COUNT(*)` agrupados por estação. Isso evita carregar mais de 630 mil medições só para saber o período. O intervalo médio sai da própria cobertura: (última − primeira) / (leituras − 1). Os nomes vêm de `EstacaoRepository.get_all()` e `MunicipioRepository.get_com_estacoes()`.
+
+**Operadores (decisão de 23/10/2026):** `LeituraRepository.get_operadores()` agrupa as leituras por estação e `codigo_operador`, com `MIN`, `MAX` e `COUNT(L.id_leitura)`. Lê só o código, que identifica o posto de trabalho e não é dado pessoal. Nome e CPF (hash), e-mail (criptografado) e município do operador nunca entram na consulta, e o usuário `agente_leitura` tem `DENY` de coluna neles (POL-02). A contagem é por `L.id_leitura`, e não `COUNT(*)`, porque o SQL Server recusa `COUNT(*)` numa tabela com coluna negada. O system prompt (regra 7) manda responder "quem opera a estação?" com o código e recusar nome, CPF e e-mail.
 
 ### 4.2 `listar_parametros` (Fase 2)
 

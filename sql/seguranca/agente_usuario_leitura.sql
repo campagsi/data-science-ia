@@ -14,7 +14,8 @@
 --
 -- Por que não o papel db_datareader: ele dá leitura de TODAS as tabelas,
 -- inclusive Operadores (CPF e nome com hash, e-mail criptografado). Aqui o
--- usuário recebe SELECT só nas tabelas que as ferramentas usam (menor privilégio).
+-- usuário recebe SELECT só nas tabelas que as ferramentas usam (menor privilégio)
+-- e, de Operadores, só as colunas do código (decisão de 23/10/2026).
 
 IF DATABASE_PRINCIPAL_ID('agente_leitura') IS NULL
     THROW 50001, 'O usuário agente_leitura não existe. Crie-o antes (passo 1 acima e docs/manual-execucao.md § 4).', 1;
@@ -30,11 +31,17 @@ GRANT SELECT ON dbo.Leituras TO agente_leitura;
 GRANT SELECT ON dbo.Leitura_Itens TO agente_leitura;
 GO
 
--- POL-02: nada de operadores. A coluna Leituras.operador_id continua legível:
--- sem acesso a Operadores, o número sozinho não identifica ninguém, e um DENY
--- de coluna faz o SQL Server recusar até SELECT COUNT(*) FROM dbo.Leituras
--- (comportamento conferido no teste de integração em 21/10/2026).
-DENY SELECT ON dbo.Operadores TO agente_leitura;
+-- POL-02: de Operadores, o agente lê só o código (codigo_operador, que identifica
+-- o posto de trabalho e não é dado pessoal) e o id usado no JOIN com Leituras.
+-- Nome e CPF (hash), e-mail (criptografado) e município do operador ficam negados
+-- por coluna: DENY vence GRANT, mesmo que algum papel conceda leitura no futuro.
+-- Cuidado: com coluna negada, o SQL Server recusa SELECT * e COUNT(*) na tabela;
+-- por isso LeituraRepository.get_operadores() conta por COUNT(L.id_leitura).
+-- O REVOKE tira o DENY da tabela inteira da versão anterior deste script; GRANT e
+-- DENY de coluna vêm logo depois, então rodar de novo dá o mesmo resultado.
+REVOKE SELECT ON dbo.Operadores FROM agente_leitura;
+GRANT SELECT ON dbo.Operadores (id_operador, codigo_operador) TO agente_leitura;
+DENY SELECT ON dbo.Operadores (nome_hash, cpf_hash, email_criptografado, municipio_id) TO agente_leitura;
 GO
 
 -- POL-01: escrita e mudança de estrutura negadas explicitamente, mesmo que

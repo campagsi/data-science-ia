@@ -128,7 +128,7 @@ Os testes de integração aplicam o DDL e, em seguida, todas as migrations (`tes
 
 ### Usuário só de leitura do agente analítico
 
-O agente analítico ([agente/README.md](agente/README.md)) lê o banco com um usuário próprio, `agente_leitura`, que não grava nada e não lê a tabela `Operadores` (políticas POL-01 e POL-02 de [agente/guardrails-e-owasp.md § 9](agente/guardrails-e-owasp.md#9-políticas-de-segurança-do-agente)). O script [sql/seguranca/agente_usuario_leitura.sql](../sql/seguranca/agente_usuario_leitura.sql) **não é uma migration**: ele muda permissões, não a estrutura, por isso fica fora de `sql/migrations/` e não altera o DDL. É idempotente.
+O agente analítico ([agente/README.md](agente/README.md)) lê o banco com um usuário próprio, `agente_leitura`, que não grava nada e, da tabela `Operadores`, lê só o código do operador (políticas POL-01 e POL-02 de [agente/guardrails-e-owasp.md § 9](agente/guardrails-e-owasp.md#9-políticas-de-segurança-do-agente)). O script [sql/seguranca/agente_usuario_leitura.sql](../sql/seguranca/agente_usuario_leitura.sql) **não é uma migration**: ele muda permissões, não a estrutura, por isso fica fora de `sql/migrations/` e não altera o DDL. É idempotente.
 
 1. Quem administra o banco cria o usuário uma vez, com uma senha forte que **não vai para o Git**:
 
@@ -142,11 +142,13 @@ O agente analítico ([agente/README.md](agente/README.md)) lê o banco com um us
    sqlcmd -S <servidor>.database.windows.net -d <banco> -U <usuario-admin> -P <senha> -f 65001 -i sql/seguranca/agente_usuario_leitura.sql
    ```
 
-   O script dá `SELECT` só em `Estados`, `Municipios`, `Estacoes`, `Parametros`, `Leituras` e `Leitura_Itens`, nega `SELECT` em `Operadores` e nega `INSERT`, `UPDATE`, `DELETE` e `ALTER` no schema `dbo`. Não use o papel `db_datareader`: ele daria leitura de `Operadores`.
+   O script dá `SELECT` só em `Estados`, `Municipios`, `Estacoes`, `Parametros`, `Leituras` e `Leitura_Itens`; em `Operadores`, dá `SELECT` só em `id_operador` e `codigo_operador` e nega nome, CPF, e-mail e município por coluna; e nega `INSERT`, `UPDATE`, `DELETE` e `ALTER` no schema `dbo`. Não use o papel `db_datareader`: ele daria leitura de `Operadores`.
 
 3. No `.env`, `AGENTE_SQL_CONNECTIONSTRING` com `UID=agente_leitura` e a senha. A variável é obrigatória quando `AGENTE_LLM_FORNECEDOR` é `openai` ou `anthropic`, e o agente nunca usa a `AZURE_SQL_CONNECTIONSTRING` da ingestão.
 
-O teste `tests/integration/test_agente_somente_leitura.py` aplica o script num banco descartável e confere que o usuário lê as tabelas das ferramentas, não grava, não altera a estrutura e não lê `Operadores`.
+O teste `tests/integration/test_agente_somente_leitura.py` aplica o script num banco descartável e confere que o usuário lê as tabelas das ferramentas, não grava, não altera a estrutura, lê de `Operadores` só o código e não lê as colunas com dados pessoais.
+
+**Atualização de 23/10/2026:** o agente passou a informar o código do operador de cada estação. Num banco que já tinha o script aplicado, **rode o script de novo** (ele é idempotente): ele tira o `DENY` da tabela `Operadores` inteira e aplica as permissões por coluna. Sem isso, a `panorama_dados` falha por falta de permissão.
 
 #### Banco local para testar o agente (`agente_local`)
 
@@ -289,12 +291,9 @@ python main.py --ingestao
 
 A ingestão:
 
-1. coleta, normaliza e anonimiza o lote;
-2. cadastra parâmetros novos;
-3. valida;
-4. grava no banco, numa única transação.
-
-O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
+1. coleta o lote;
+2. parte A, data lake: grava na Bronze o que atende o contrato; na Silver, remove repetidos, normaliza, anonimiza, cadastra parâmetros novos e valida; gera a Gold (arquivos em `data_lake/`);
+3. parte B, banco: registra as rejeições no log e grava só os registros válidos, numa única transação.
 
 A carga é **idempotente**: reexecutar o mesmo período substitui as leituras de cada estação + dia, sem duplicar. Ao final, o log registra uma linha `Resumo da ingestão` com recebidos, válidos, inválidos, itens descartados, leituras gravadas e substituídas e itens gravados.
 
@@ -333,23 +332,27 @@ python main.py --pergunta "Qual o pH médio em junho de 2026?"   # uma pergunta,
 python main.py --agente                                         # chat; "sair" ou Ctrl+C encerram
 ```
 
+**Base do agente pela interface:** a página `/agente` tem, na barra lateral, o painel **Base do agente**. Ele mostra a situação do índice da documentação, do índice dos dias e do modelo de previsão (Em dia, Desatualizado, Ausente ou Indisponível). Cada linha tem o botão **Atualizar** (ou **Treinar**, para a previsão), e há também o **Atualizar tudo**. Os botões **só habilitam quando algo está desatualizado ou ausente**: a documentação mudou desde a última indexação, ou os dados do banco mudaram desde a última indexação dos dias ou o último treino. Reingerir os mesmos dados não deixa nada desatualizado. A atualização roda em segundo plano, uma por vez, e o painel mostra o andamento (o treino da previsão leva cerca de 1 minuto). Ao terminar, a próxima pergunta já usa o índice e o modelo novos, sem reiniciar o servidor. Os dias e a previsão precisam da `AGENTE_SQL_CONNECTIONSTRING`; sem ela, aparecem como **Indisponível**. Os comandos abaixo fazem a mesma coisa pelo terminal e gravam o mesmo registro de atualização.
+
+**Fluxo depois de uma ingestão:** rode a ingestão (botão "Executar ingestão" no dashboard ou `python main.py --ingestao`), abra `/agente` e clique em **Atualizar tudo** se o painel acusar algo desatualizado.
+
 **Índice da documentação:** para o agente explicar regras e decisões citando os documentos (ferramenta `buscar_documentacao`), rode `python main.py --indexar` uma vez e **de novo sempre que a documentação mudar**. A primeira vez baixa o modelo de embeddings (~0,24 GB) para `data/agente/modelos/` e leva cerca de 30 s. As seguintes só vetorizam os trechos que mudaram, e sem mudança registram `inseridos=0 removidos=0`. Sem índice, o agente responde números normalmente, só sem citar a documentação, e registra um aviso no log. O banco vetorial padrão é em memória (`data/agente/indice_docs.*`). Com `AGENTE_VETORES=chroma` no `.env`, o índice vai para o ChromaDB (`data/agente/chroma`); ao trocar, rode `--indexar` de novo.
 
 A resposta mostra as **fontes** (ferramentas executadas, com os argumentos) e os tokens consumidos. O log da execução (etapa `agente`, em `logs/`) tem uma linha por pergunta, com CPF, e-mail e telefone mascarados, uma por ferramenta e uma por resposta. Também registra uma linha `WARNING guardrail=POL-xx` sempre que uma política de segurança age. Variável ausente ou inválida encerra com `CRITICAL` e código `1`, sem mostrar valores.
 
 **Estudo sem custo e sem chave:** `python -m src.agente.exemplos.e05_tool_use_passo_a_passo`, `e06_agente_offline` e `e11_guardrails` usam o LLM roteirizado e dados de exemplo em memória.
 
-**Índice dos dias:** `python main.py --indexar-dias` lê as medições com `AGENTE_SQL_CONNECTIONSTRING` (usuário só de leitura), gera um resumo por estação e dia e o indexa em `data/agente/dias/`. Rode depois de cada ingestão: só os dias cujo resumo mudou são vetorizados de novo. Sem esse índice, o agente funciona sem a ferramenta `dias_semelhantes` ("que dias foram parecidos com 15/06?").
+**Índice dos dias:** `python main.py --indexar-dias` lê as medições com `AGENTE_SQL_CONNECTIONSTRING` (usuário só de leitura), gera um resumo por estação e dia e o indexa em `data/agente/dias/`. Rode depois de cada ingestão que mudar os dados (ou use o painel da página `/agente`): só os dias cujo resumo mudou são vetorizados de novo. Sem esse índice, o agente funciona sem a ferramenta `dias_semelhantes` ("que dias foram parecidos com 15/06?").
 
 **Modelo de previsão:** `python main.py --treinar-previsao` lê as medições com `AGENTE_SQL_CONNECTIONSTRING` e avalia temperatura do ar, umidade, temperatura da água e radiação em 1, 3, 6, 12 e 24 h, com validação temporal contra dois baselines (leva cerca de 1 minuto). Grava o modelo e o `metadados.json` em `data/agente/modelos/previsao/` e o relatório em `relatorios/previsao_<data>.md`. Só os horizontes em que o modelo vence os dois baselines ficam disponíveis para a ferramenta `prever`. **Treine de novo depois de atualizar o scikit-learn**: o agente recusa um modelo de outra versão (POL-12) e segue sem a `prever`, com um aviso no log.
 
 **Laudos de anomalias:** `python main.py --laudo --inicio AAAA-MM-DD [--fim AAAA-MM-DD] [--estacao CODIGO] [--limite N]` pede ao LLM a causa provável de cada anomalia (falha de sensor, evento real ou inconclusivo) e a severidade, com o contexto vizinho. Exige as mesmas variáveis do agente (chave da Anthropic e `AGENTE_SQL_CONNECTIONSTRING`). Por padrão, faz no máximo 50 laudos, das anomalias mais extremas (`--limite 0` = todas; cerca de US$ 0,002 por laudo no Haiku). Grava `relatorios/laudos_<inicio>_<fim>.csv` e `.md`, marcados como gerados por IA. Resposta fora do formato é descartada e aparece no log (`guardrail=POL-06`) e na lista de descartados do Markdown. O laudo não altera o banco nem o indicador de alerta.
 
-**Avaliação do agente (golden set):** mede a qualidade com 52 perguntas de referência ([agente/avaliacao.md](agente/avaliacao.md)). O relatório vai para `relatorios/` (fora do Git), e o log, para a etapa `avaliacao`.
+**Avaliação do agente (golden set):** mede a qualidade com 53 perguntas de referência ([agente/avaliacao.md](agente/avaliacao.md)). O relatório vai para `relatorios/` (fora do Git), e o log, para a etapa `avaliacao`.
 
 ```bash
 python -m src.agente.avaliacao --so-recuperacao   # grátis: só a busca na documentação (precisa do índice)
-python -m src.agente.avaliacao                    # completa: ~52 perguntas ao LLM (~US$ 0,50 a 1,00 no Haiku)
+python -m src.agente.avaliacao                    # completa: ~53 perguntas ao LLM (~US$ 0,50 a 1,00 no Haiku)
 python -m src.agente.avaliacao --lote             # só a seleção de ferramentas, pela Batch API (metade do preço)
 ```
 

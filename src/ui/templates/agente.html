@@ -38,6 +38,17 @@
       </section>
       {% endif %}
 
+      <section class="rail-section" aria-labelledby="base-titulo">
+        <p class="eyebrow">Manutenção</p>
+        <h2 id="base-titulo">Base do agente</h2>
+        <p class="muted">Índices e modelo que o agente consulta. O botão só habilita quando a documentação ou os dados mudaram desde a última atualização.</p>
+        <ul class="base-lista" id="base-lista" aria-live="polite">
+          <li class="muted">Verificando…</li>
+        </ul>
+        <button class="button button-primary" id="base-tudo" type="button" disabled>Atualizar tudo</button>
+        <p class="ingest-status" id="base-andamento" role="status" aria-live="polite"></p>
+      </section>
+
       <section class="rail-section">
         <a class="text-button rail-link" href="/">← Voltar ao dashboard</a>
       </section>

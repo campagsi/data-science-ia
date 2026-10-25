@@ -427,6 +427,21 @@ Decisão DA10 (21/10/2026): o treino do modelo de previsão entra no escopo. É 
 
 ---
 
+## Painel da base do agente na página `/agente`
+
+**Objetivo:** atualizar pela interface, e só quando necessário, os artefatos que o agente consulta: índice da documentação, índice dos dias e modelo de previsão ([arquitetura.md § 11](arquitetura.md#painel-base-do-agente)).
+
+- [x] `LeituraRepository.get_assinatura()` e `ConsultaDados.assinatura()`: assinatura do conteúdo das medições (só leitura, sem `id_leitura` nem `data_ingestao`)
+- [x] `src/agente/manutencao.py`: situação de cada artefato (ausente, desatualizado, atualizado, indisponível), atualização com registro da assinatura e `PainelDaBase` (cache de 30 s, uma atualização por vez em segundo plano)
+- [x] `main.py`: `--indexar`, `--indexar-dias` e `--treinar-previsao` passam a usar o mesmo núcleo
+- [x] Rotas `GET /agente/base` e `POST /agente/base/atualizar` (POL-07 e POL-10), com o agente da web descartado depois da atualização e da ingestão
+- [x] Painel na barra lateral com um botão por artefato e "Atualizar tudo", habilitados só com algo pendente
+- [x] Testes (`test_agente_manutencao.py` e `test_ui_agente.py`) e documentação
+
+**Status:** concluída em 23/10/2026 (relatório em [analise.md § 11](analise.md#11-relatório-das-fases)).
+
+---
+
 ## Fora deste TODO
 
 - Text-to-SQL (descartado; ver [analise.md § 6](analise.md#6-comparação-de-abordagens)).

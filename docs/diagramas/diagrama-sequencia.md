@@ -11,6 +11,8 @@ sequenceDiagram
     participant Config as config.py
     participant Sec as security.py
     participant Client as data_client.py
+    participant Lake as extracao_dados.py
+    participant Files as data_lake/
     participant Normalizer as normalization_service.py
     participant Param as parametro_service.py
     participant Validator as validation_service.py
@@ -26,20 +28,30 @@ sequenceDiagram
     Main->>Client: fetch_data()
     Client-->>Main: raw_data
 
-    Main->>Normalizer: normalize(raw_data)
+    Note over Main,Files: Parte A: data lake (_processar_no_data_lake)
+    Main->>Lake: extrair_dados_bronze(raw_data)
+    Lake->>Validator: validar_contrato(raw_data)
+    Lake->>Files: bronze/dados_bronze.json (aceitos, ainda em claro)
+    Lake-->>Main: recusados no contrato
+    Main->>Log: registrar_resultados_validacao(recusados, "Registro")
+
+    Main->>Lake: extrair_dados_silver("dados_bronze.json")
+    Lake->>Files: lê a Bronze e remove registro_codigo repetido
+    Lake->>Normalizer: normalize(registros)
     Normalizer->>Sec: anonimizar_cpf(), anonimizar_nome(), criptografar_email()
     Normalizer->>Log: registrar_rejeicao() (o que não pode ser convertido)
-    Normalizer-->>Main: normalizados (cabeçalho + itens)
-
-    Main->>Param: sincronizar(descobrir_parametros(normalizados))
+    Lake->>Param: sincronizar(descobrir_parametros(normalizados))
     Param->>DB: SELECT / INSERT Parametros (novos, sem faixa)
-    Param-->>Main: parâmetros aceitos (id e faixa)
-    Main->>DB: SELECT Estados (siglas)
+    Lake->>DB: SELECT Estados (siglas)
+    Lake->>Validator: validate_data(normalizados)
+    Lake->>Files: silver/dados_silver.parquet (só os válidos)
+    Lake-->>Main: um resultado por registro + parâmetros aceitos
 
-    Main->>Validator: validate_data(normalizados)
-    Validator-->>Main: um resultado por registro
+    Main->>Lake: extrair_dados_gold("dados_silver.parquet")
+    Lake->>Files: gold/ (dimensões e fato)
+
+    Note over Main,DB: Parte B: banco relacional (_gravar_no_banco)
     Main->>Log: registrar_resultados_validacao(resultados)
-
     Main->>Repository: save_readings(registros válidos, parâmetros, fonte)
     Repository->>DB: transaction()
     Note over Repository,DB: Uma única conexão e transação para o lote.
@@ -63,9 +75,11 @@ sequenceDiagram
 
 `fetch_data()` busca `GET {FONTE_DADOS}/api/v1/data-set` e exige uma lista de objetos. Nova tentativa com espera crescente (1 s, 2 s, 4 s; 4 tentativas) para queda de conexão, timeout, HTTP 5xx e 429 (respeitando `Retry-After`), no máximo 30 requisições por minuto, resposta vazia tratada como lote vazio (`WARNING`) e falha definitiva como `FonteIndisponivelError` (`ERROR` e depois `CRITICAL`). Com lote vazio, a `run_pipeline()` registra o resumo zerado e termina sem abrir conexão com o banco.
 
-### 3. Normalização e anonimização (`normalization_service.py`)
+### 3. Data lake (`extracao_dados.py`, chamado por `_processar_no_data_lake()`)
 
-Limpa os textos, converte números e datas e separa cada registro em cabeçalho mais itens, um por parâmetro (`*_tipo_codigo`). Anonimiza o operador com `src/security.py` e não copia CPF, nome e e-mail originais. O que não pode ser convertido vai para o log de rejeitados sem interromper o lote. Formato completo em [contrato-dados.md](../contrato-dados.md).
+As etapas 3 a 5 acontecem dentro das camadas do data lake, gravadas em `data_lake/`. A **Bronze** confere cada registro pelo contrato (`ValidationService.validar_contrato()`), grava os aceitos como chegaram em `bronze/dados_bronze.json` (ainda com dado pessoal em claro, por isso a pasta fica fora do Git) e devolve os recusados, que o `main.py` envia ao log de rejeitados. A **Silver** lê a Bronze, remove `registro_codigo` repetido (fica a última ocorrência) e executa a normalização, os parâmetros e a validação descritos abaixo; os válidos vão para `silver/dados_silver.parquet`, e o resultado de todos os registros volta ao `main.py`. A **Gold** monta dimensões e fato a partir da Silver, para a API do Power BI, e não participa da gravação no banco.
+
+Normalização e anonimização (`normalization_service.py`): limpa os textos, converte números e datas e separa cada registro em cabeçalho mais itens, um por parâmetro (`*_tipo_codigo`). Anonimiza o operador com `src/security.py` e não copia CPF, nome e e-mail originais. O que não pode ser convertido vai para o log de rejeitados sem interromper o lote. Formato completo em [contrato-dados.md](../contrato-dados.md).
 
 ### 4. Parâmetros e referências (`parametro_service.py`, `estado_repository.py`)
 
@@ -73,7 +87,7 @@ Limpa os textos, converte números e datas e separa cada registro em cabeçalho 
 
 ### 5. Validação (`validation_service.py`) e log de rejeitados
 
-`ValidationService.validate_data()`, com as faixas, as siglas e os parâmetros aceitos lidos do banco, devolve um resultado por registro com `valido`, `campos_nulos`, `itens_invalidos`, `motivos` e o registro só com as medições válidas. Ela não grava nem loga. `registrar_resultados_validacao()` grava o log de rejeitados a partir desses resultados, e só `ValidationService.registros_validos(resultados)` segue para a gravação.
+`ValidationService.validate_data()`, com as faixas, as siglas e os parâmetros aceitos lidos do banco, devolve um resultado por registro com `valido`, `campos_nulos`, `itens_invalidos`, `motivos` e o registro só com as medições válidas. Ela não grava nem loga. Já na parte B (`_gravar_no_banco()`), `registrar_resultados_validacao()` grava o log de rejeitados a partir desses resultados, e só `ValidationService.registros_validos(resultados)` segue para a gravação.
 
 ### 6. Gravação (`leitura_repository.py` → banco)
 
@@ -81,7 +95,7 @@ Limpa os textos, converte números e datas e separa cada registro em cabeçalho 
 
 ### 7. Resumo (`logger.py`)
 
-Depois do commit, `registrar_resumo()` grava no log a linha `Resumo da ingestão`, que é também o retorno de `run_pipeline()`. O Data Lake (Bronze, Silver e Gold) não será implementado neste projeto.
+Depois do commit, `registrar_resumo()` grava no log a linha `Resumo da ingestão`, que é também o retorno de `run_pipeline()`. `rejeitados_na_normalizacao` conta quem não chegou à validação: recusado pelo contrato na Bronze, repetido removido na Silver ou recusado na normalização.
 
 ## Análise e relatório (`python main.py --analise`)
 

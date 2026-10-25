@@ -329,3 +329,34 @@ def test_get_cobertura_agrega_no_banco():
     assert cobertura == [{"estacao_codigo": "EST-RJ-001", "primeira_leitura": datetime(2026, 4, 1),
                           "ultima_leitura": datetime(2026, 10, 23, 23, 30), "leituras": 9806}]
     assert "COUNT(*)" in banco.query and "GROUP BY" in banco.query
+
+
+def test_get_operadores_le_so_o_codigo_do_operador():
+    """POL-02: nome e CPF (hash) e e-mail nunca entram na consulta do agente."""
+
+    class BancoFalso:
+        """Devolve uma linha como o SQL agregado e guarda a consulta recebida."""
+
+        def fetch_all(self, query, params=None):
+            """Resultado agregado por estação e operador."""
+            self.query = query
+            return [("EST-RJ-001", "OP-RJ-001", datetime(2026, 4, 1), datetime(2026, 10, 23), 4928)]
+
+    banco = BancoFalso()
+
+    operadores = LeituraRepository(banco).get_operadores()
+
+    assert operadores == [{"estacao_codigo": "EST-RJ-001", "operador_codigo": "OP-RJ-001", "primeira_leitura": datetime(2026, 4, 1),
+                           "ultima_leitura": datetime(2026, 10, 23), "leituras": 4928}]
+    for coluna in ("nome_hash", "cpf_hash", "email_criptografado", "municipio_id", "O.*"):
+        assert coluna not in banco.query
+    # Por quê: com colunas negadas em Operadores, o SQL Server recusa COUNT(*) (sql/seguranca).
+    assert "COUNT(*)" not in banco.query and "COUNT(L.id_leitura)" in banco.query
+
+
+def test_panorama_traz_os_codigos_dos_operadores_e_nada_pessoal(registro):
+    estacao = registro.executar(ChamadaFerramenta("c1", "panorama_dados", {})).dados["estacoes"][0]
+
+    assert [o["codigo"] for o in estacao["operadores"]] == ["OP-1"]
+    assert set(estacao["operadores"][0]) == {"codigo", "primeira_leitura", "ultima_leitura", "leituras"}
+    assert estacao["operadores"][0]["leituras"] == estacao["leituras"]

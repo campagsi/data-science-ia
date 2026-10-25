@@ -152,3 +152,135 @@ def test_html_do_llm_nunca_vira_script(monkeypatch):
 
     assert "<script" not in html and "<img" not in html and 'href="javascript:' not in html
     assert "&lt;script&gt;" in html
+
+
+# --- Base do agente (GET /agente/base e POST /agente/base/atualizar) -----------------------
+
+
+def montar_com_base(monkeypatch, itens_pendentes=("dias",), atualizar=None, **ambiente):
+    """Aplicação com um PainelDaBase falso; conta quantas vezes o agente é montado."""
+    from src.agente.manutencao import ITENS, PainelDaBase, situacao
+
+    for variavel in ("AGENTE_LIMITE_WEB", "AGENTE_CHAVE_WEB"):
+        monkeypatch.delenv(variavel, raising=False)
+    for variavel, valor in ambiente.items():
+        monkeypatch.setenv(variavel, valor)
+    estado = {"pendentes": set(itens_pendentes)}
+    montagens = []
+
+    def verificar():
+        """Itens pendentes do teste desatualizados; o resto em dia."""
+        return {item: situacao("desatualizado" if item in estado["pendentes"] else "atualizado", "motivo") for item in ITENS}
+
+    def atualizar_item(item):
+        """Atualiza o item (ou chama a função do teste)."""
+        if atualizar is not None:
+            atualizar(item)
+        estado["pendentes"].discard(item)
+
+    def fabrica():
+        """Agente offline; registra cada montagem."""
+        montagens.append(1)
+        return criar_agente(ConfigAgente("simulado"), LLMRoteirizado([RespostaLLM(texto="Ok.")] * 5), consulta_de_exemplo())
+
+    painel = PainelDaBase(verificar, atualizar_item)
+    aplicacao = create_app(fabrica, painel)
+    aplicacao.config.update(TESTING=True)
+    return aplicacao.test_client(), painel, montagens
+
+
+def test_pagina_tem_o_painel_da_base_com_os_botoes(monkeypatch):
+    cliente, _, _ = montar_com_base(monkeypatch)
+
+    html = cliente.get("/agente").get_data(as_text=True)
+
+    assert 'id="base-lista"' in html and 'id="base-tudo"' in html and "Atualizar tudo" in html
+    assert re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", html) == []  # POL-09 continua valendo
+
+
+def test_get_base_devolve_situacao_nome_e_tarefa(monkeypatch):
+    cliente, _, _ = montar_com_base(monkeypatch, itens_pendentes=("previsao",))
+
+    dados = cliente.get("/agente/base").get_json()
+
+    assert dados["itens"]["previsao"] == {"situacao": "desatualizado", "motivo": "motivo", "atualizado_em": None, "nome": "Modelo de previsão"}
+    assert dados["itens"]["documentacao"]["situacao"] == "atualizado"
+    assert dados["tarefa"]["executando"] is False
+
+
+def test_atualizar_pendente_responde_202_e_monta_um_agente_novo(monkeypatch):
+    cliente, painel, montagens = montar_com_base(monkeypatch, itens_pendentes=("dias",))
+    perguntar(cliente, "pH?")
+
+    resposta = cliente.post("/agente/base/atualizar", json={"itens": ["dias"]})
+    painel.aguardar(5)
+    perguntar(cliente, "pH?")
+
+    assert resposta.status_code == 202 and resposta.get_json()["tarefa"]["executando"] in (True, False)
+    assert painel.estado()["tarefa"]["concluidos"] == ["dias"]
+    assert len(montagens) == 2  # o agente foi descartado e montado de novo com a base nova
+    assert cliente.get("/agente/base").get_json()["itens"]["dias"]["situacao"] == "atualizado"
+
+
+@pytest.mark.parametrize(
+    ("corpo", "trecho"),
+    [({"itens": ["documentacao"]}, "Documentação"), ({"itens": "todos"}, "já está em dia"), ({"itens": ["xpto"]}, "desconhecido"), ([], "itens")],
+)
+def test_atualizar_o_que_esta_em_dia_ou_pedido_invalido_responde_400(monkeypatch, corpo, trecho):
+    cliente, _, _ = montar_com_base(monkeypatch, itens_pendentes=())
+
+    resposta = cliente.post("/agente/base/atualizar", json=corpo)
+
+    assert resposta.status_code == 400 and trecho in resposta.get_json()["erro"]
+
+
+def test_segunda_atualizacao_durante_a_primeira_responde_409(monkeypatch):
+    import threading
+
+    liberar = threading.Event()
+    cliente, painel, _ = montar_com_base(monkeypatch, itens_pendentes=("dias", "previsao"), atualizar=lambda item: liberar.wait(5))
+
+    primeira = cliente.post("/agente/base/atualizar", json={"itens": ["dias"]})
+    segunda = cliente.post("/agente/base/atualizar", json={"itens": ["previsao"]})
+    liberar.set()
+    painel.aguardar(5)
+
+    assert (primeira.status_code, segunda.status_code) == (202, 409)
+
+
+def test_rotas_da_base_exigem_a_chave_quando_configurada(monkeypatch):
+    cliente, _, _ = montar_com_base(monkeypatch, AGENTE_CHAVE_WEB="segredo-web")
+
+    sem_chave = (cliente.get("/agente/base").status_code, cliente.post("/agente/base/atualizar", json={"itens": "todos"}).status_code)
+    com_chave = cliente.get("/agente/base", headers={"X-API-Key": "segredo-web"}).status_code
+
+    assert sem_chave == (401, 401) and com_chave == 200
+
+
+def test_falha_ao_verificar_a_base_responde_503_sem_detalhe(monkeypatch, caplog):
+    from src.agente.manutencao import PainelDaBase
+
+    def quebrar():
+        """O banco caiu."""
+        raise ConnectionError("Password=segredo")
+
+    monkeypatch.delenv("AGENTE_CHAVE_WEB", raising=False)
+    aplicacao = create_app(None, PainelDaBase(quebrar, lambda item: None))
+    with caplog.at_level(logging.ERROR):
+        resposta = aplicacao.test_client().get("/agente/base")
+
+    assert resposta.status_code == 503 and "segredo" not in caplog.text + resposta.get_data(as_text=True)
+
+
+def test_ingestao_avisa_o_painel_e_descarta_o_agente(monkeypatch):
+    from src.ui import app as dashboard_module
+
+    cliente, painel, montagens = montar_com_base(monkeypatch)
+    avisos = []
+    monkeypatch.setattr(dashboard_module, "iniciar_aplicacao", lambda etapa: None)
+    monkeypatch.setattr(dashboard_module, "run_pipeline", lambda: {"recebidos": 0})
+    monkeypatch.setattr(painel, "dados_mudaram", lambda: avisos.append(1))
+
+    resposta = cliente.post("/ingestao")
+
+    assert resposta.status_code == 200 and avisos == [1]

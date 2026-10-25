@@ -101,6 +101,60 @@ class LeituraRepository:
             for linha in self.__database.fetch_all(query)
         ]
 
+    def get_operadores(self) -> list[dict]:
+        """
+        Códigos dos operadores que registraram leituras em cada estação (só leitura).
+
+        Só o codigo_operador, que identifica o posto de trabalho e não é dado
+        pessoal. Nome e CPF (hash) e e-mail (criptografado) nunca são lidos: o
+        usuário do agente nem tem permissão nessas colunas (POL-02,
+        sql/seguranca/agente_usuario_leitura.sql). COUNT(L.id_leitura), e não
+        COUNT(*), porque o SQL Server recusa COUNT(*) numa tabela com coluna negada.
+        [{"estacao_codigo", "operador_codigo", "primeira_leitura", "ultima_leitura", "leituras"}].
+        """
+        query = """
+            SELECT E.codigo_estacao, O.codigo_operador, MIN(L.data_hora), MAX(L.data_hora), COUNT(L.id_leitura)
+            FROM dbo.Leituras AS L
+            INNER JOIN dbo.Estacoes AS E ON E.id_estacao = L.estacao_id
+            INNER JOIN dbo.Operadores AS O ON O.id_operador = L.operador_id
+            GROUP BY E.codigo_estacao, O.codigo_operador
+            ORDER BY E.codigo_estacao, O.codigo_operador
+        """
+        return [
+            {
+                "estacao_codigo": linha[0],
+                "operador_codigo": linha[1],
+                "primeira_leitura": linha[2],
+                "ultima_leitura": linha[3],
+                "leituras": int(linha[4]),
+            }
+            for linha in self.__database.fetch_all(query)
+        ]
+
+    def get_assinatura(self) -> dict:
+        """
+        Assinatura do conteúdo das medições gravadas (só leitura).
+
+        Muda quando alguma medição entra, sai ou muda de valor, mas não quando a
+        ingestão regrava os mesmos dados: o checksum usa codigo_registro, parâmetro
+        e valor, e não id_leitura nem data_ingestao. Serve para o agente saber se o
+        índice dos dias e o modelo de previsão estão em dia com o banco.
+        {"medicoes", "primeira", "ultima", "checksum"}, com as datas em ISO.
+        """
+        query = """
+            SELECT COUNT_BIG(*), MIN(L.data_hora), MAX(L.data_hora),
+                   CHECKSUM_AGG(BINARY_CHECKSUM(L.codigo_registro, LI.parametro_id, LI.valor))
+            FROM dbo.Leituras AS L
+            INNER JOIN dbo.Leitura_Itens AS LI ON LI.leitura_id = L.id_leitura
+        """
+        medicoes, primeira, ultima, checksum = self.__database.fetch_all(query)[0]
+        return {
+            "medicoes": int(medicoes),
+            "primeira": primeira.isoformat() if primeira else None,
+            "ultima": ultima.isoformat() if ultima else None,
+            "checksum": int(checksum) if checksum is not None else None,
+        }
+
     def substituir_leituras(
         self,
         leituras: list[LeituraModel],

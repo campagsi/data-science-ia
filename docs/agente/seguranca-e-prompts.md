@@ -126,8 +126,8 @@ Limites aplicados pelo **código**, não pelo prompt. O prompt pode ser ignorado
 | Tempo limite por tentativa e novas tentativas | 60 s (DA6); 2 novas tentativas | Adaptador do LLM | POL-07 |
 | Tokens máximos de saída e esforço | 16.000 (`max_tokens`); `effort` = `medium` | Adaptador do LLM | POL-07 |
 | Ferramentas de escrita | nenhuma existe | Catálogo ([ferramentas.md](ferramentas.md)) + teste estático | POL-01 |
-| Permissão no banco | usuário `agente_leitura`: `SELECT` nas tabelas usadas, `DENY` em `Operadores` | Azure SQL | POL-01, POL-02 |
-| Acesso a `Operadores` | nenhuma ferramenta lê | Catálogo + teste automático + `DENY` no banco | POL-02 |
+| Permissão no banco | usuário `agente_leitura`: `SELECT` nas tabelas usadas e só o código de `Operadores` (nome, CPF, e-mail e município negados por coluna) | Azure SQL | POL-01, POL-02 |
+| Acesso a `Operadores` | só o código do operador, em `panorama_dados` (não é dado pessoal) | Consulta que lê só `codigo_operador` + teste automático + `DENY` de coluna no banco | POL-02 |
 | Argumentos | `strict: true` no schema + Pydantic com `extra="forbid"` (tipos, enums, faixas, datas coerentes) | Adaptador + `Ferramenta.executar()` | POL-06 |
 | Saída na web | Markdown sem HTML, só links http(s), `Content-Security-Policy` | `src/ui/agente.py` | POL-09 |
 
@@ -154,7 +154,7 @@ Na avaliação ([avaliacao.md](avaliacao.md)) há perguntas adversariais, como "
 | Texto da resposta | Mascarado antes de sair, para o caso de o LLM repetir um dado digitado (POL-02) |
 | Resultados enviados ao LLM | Só agregados e medições ambientais (sem dado pessoal) |
 | Histórico da conversa | Só em memória do processo, já mascarado, descartado ao reiniciar. Não é gravado em banco |
-| Tabela `Operadores` | O usuário do banco do agente tem `DENY SELECT` nela (POL-02, L4) |
+| Tabela `Operadores` | O usuário do banco do agente lê só `id_operador` e `codigo_operador`; nome, CPF, e-mail e município têm `DENY SELECT` por coluna (POL-02, L4) |
 
 **Função nova em `src/security.py`** (regra 5 do [CLAUDE.md](../../CLAUDE.md): dado pessoal só por esse módulo):
 

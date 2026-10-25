@@ -14,6 +14,7 @@ exemplo offline do agente (e06_agente_offline, Fase 3).
 
 Documentação: docs/agente/guia-estudos.md § 5
 """
+import hashlib
 from datetime import date, datetime, timedelta
 
 from src.agente.ferramentas.consulta_dados import ConsultaDados
@@ -26,6 +27,8 @@ ESTACAO_EXEMPLO = EstacaoModel(
 PARAMETRO_EXEMPLO = ParametroModel(
     id_parametro=1, codigo_parametro="TIP-PH", nome="pH", unidade_medida="pH", valor_minimo=0, valor_maximo=14
 )
+# Código do operador (não é dado pessoal) das medições de exemplo.
+OPERADOR_EXEMPLO = "OP-1"
 
 
 def medicoes_de_exemplo(valores: list[float], horas: list[int] | None = None) -> list[dict]:
@@ -115,6 +118,34 @@ class LeiturasEmMemoria:
             }
             for codigo, leituras in sorted(por_estacao.items())
         ]
+
+    def get_operadores(self) -> list[dict]:
+        """Códigos dos operadores por estação; medição sem "operador_codigo" conta como OPERADOR_EXEMPLO."""
+        por_chave: dict[tuple[str, str], set] = {}
+        for medicao in self.__medicoes:
+            chave = (medicao["estacao_codigo"], medicao.get("operador_codigo", OPERADOR_EXEMPLO))
+            por_chave.setdefault(chave, set()).add((medicao["codigo_registro"], medicao["data_hora"]))
+        return [
+            {
+                "estacao_codigo": estacao,
+                "operador_codigo": operador,
+                "primeira_leitura": min(instante for _, instante in leituras),
+                "ultima_leitura": max(instante for _, instante in leituras),
+                "leituras": len(leituras),
+            }
+            for (estacao, operador), leituras in sorted(por_chave.items())
+        ]
+
+    def get_assinatura(self) -> dict:
+        """Assinatura do conteúdo, no formato de get_assinatura() (checksum por hash das medições)."""
+        chaves = sorted((m["codigo_registro"], m["codigo_parametro"], m["valor"]) for m in self.__medicoes)
+        instantes = [m["data_hora"] for m in self.__medicoes]
+        return {
+            "medicoes": len(chaves),
+            "primeira": min(instantes).isoformat() if instantes else None,
+            "ultima": max(instantes).isoformat() if instantes else None,
+            "checksum": int(hashlib.sha256(repr(chaves).encode("utf-8")).hexdigest()[:8], 16),
+        }
 
 
 class CadastroEmMemoria:

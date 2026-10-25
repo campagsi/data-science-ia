@@ -57,7 +57,7 @@ São duas etapas (decisão DA3):
 | Conferir os números da resposta | Código próprio (`src/agente/guardrails/saida.py`) com `re` e `json` |
 | Limitar requisições na web | **Flask-Limiter** |
 | Exibir a resposta com segurança no navegador | **markdown-it-py** (HTML desabilitado) + escape automático do **Jinja2** do Flask |
-| Impedir escrita e leitura de `Operadores` no banco | **Permissões do Azure SQL** (usuário só com `SELECT` nas tabelas necessárias e `DENY` em `Operadores`) |
+| Impedir escrita e leitura de dados pessoais de `Operadores` no banco | **Permissões do Azure SQL** (usuário só com `SELECT` nas tabelas necessárias e só o código de `Operadores` (nome, CPF, e-mail e município negados por coluna)) |
 | Verificar se o código respeita as políticas | **pytest** (teste estático de nomes proibidos e teste de PII nos retornos) |
 
 **Por que não um framework:** o NeMo Guardrails não instala no Python 3.14. O Guardrails AI traz dezenas de dependências e depende de cadastro no Hub. O Presidio exige um modelo de português de cerca de 500 MB. Os guardrails deste agente são regras **determinísticas e baratas** (rodam em microssegundos, sem chamar outro modelo), que um framework não faria melhor ([seção 7](#7-alternativas-descartadas)).
@@ -199,7 +199,7 @@ Resultado de ferramenta devolvido ao Claude. Todos os resultados de uma rodada v
 - **Tempo total:** o `timeout` vale por tentativa. Com `max_retries=2`, uma chamada pode levar até 3 × 60 s. O orçamento da pergunta limita o tempo total ([seção 6](#6-tecnologias-dos-guardrails)).
 - **Cache de prompt:** o system prompt e as especificações das ferramentas são iguais em toda pergunta. Marcar `cache_control` reduz o custo, mas qualquer byte diferente invalida o cache. Por isso, no system prompt entra a **data** (muda uma vez por dia), nunca a hora.
 - **Raciocínio interno:** no Haiku 5.5 ele está ligado por padrão e conta no `max_tokens`. A resposta pode começar com blocos `thinking`, então o adaptador lê os blocos pelo `type`, nunca pela posição (`content[0]`), e devolve os blocos `thinking` intactos junto com os resultados das ferramentas.
-- **Parâmetros de amostragem:** o Haiku 5.5 recusa `temperature`, `top_p` e `top_k` diferentes do padrão (erro 400). O adaptador não os envia.
+- **Parâmetros de amostragem:** o Haiku 5.5 recusa `temperature`, `top_p` e `top_k` diferentes do padrão (erro 400). O adaptador não os envia. No adaptador da OpenAI, os modelos que não são de raciocínio (como o `gpt-4.1-mini`) recebem `temperature=0` desde 23/10/2026: com o padrão (1,0), a mesma pergunta às vezes recusava e às vezes respondia. Os modelos de raciocínio (`o*`, `gpt-5*`) não aceitam o parâmetro e recebem só o `reasoning_effort`.
 - **Modelo e custo (DA9):** `claude-haiku-5-5`. Preços conferidos em 21/10/2026, por milhão de tokens de entrada/saída: Haiku 5.5 US$ 0,10 / US$ 0,50 (pedidos de até 100 mil tokens), Sonnet 5.5 US$ 2 / US$ 10, Opus 5.5 US$ 4 / US$ 20. Estimativa por pergunta típica (~4.400 tokens de entrada e ~1.500 de saída): Haiku ~US$ 0,001, Sonnet ~US$ 0,02, Opus ~US$ 0,05. O Sonnet pode ser usado numa comparação pontual na Fase 8, só trocando `AGENTE_LLM_MODELO`. Os preços mudam e ficam fora do código.
 - **Batch API:** processamento assíncrono (até 24 h) com 50% de desconto. Serve para rodar o golden set inteiro na Fase 8 (`client.messages.batches.create(...)`).
 - **Limite de gasto:** configurar um teto mensal no Console da Anthropic antes de usar a chave. É um guardrail de custo fora do código (POL-07).
@@ -493,7 +493,7 @@ Resumo da implementação de cada política de [guardrails-e-owasp.md § 9](guar
 | Política | Guardrails | Tecnologia | Custo de execução |
 |---|---|---|---|
 | POL-01 Somente leitura | Catálogo sem escrita, usuário SQL só de leitura, teste estático | Código + permissões do Azure SQL + pytest | Zero em execução |
-| POL-02 Dados pessoais | Sem `Operadores` (catálogo + `DENY`), máscara da pergunta antes do LLM, máscara da resposta, teste de PII | `re` + `security.py` + Azure SQL + pytest | Microssegundos |
+| POL-02 Dados pessoais | De `Operadores`, só o código (consulta + `DENY` de coluna), máscara da pergunta antes do LLM, máscara da resposta, teste de PII | `re` + `security.py` + Azure SQL + pytest | Microssegundos |
 | POL-03 Números só de ferramentas | System prompt + verificação dos números com 1 pedido de correção | Código próprio (`re`, `json`) | 1 chamada extra ao LLM, **só quando** falha |
 | POL-04 Fontes verdadeiras | Fontes montadas pelo código | Código (`Fonte.de_chamada`) | Zero |
 | POL-05 Entrada controlada | Tamanho, caracteres de controle, `conversa_id` | Pydantic + `re` | Microssegundos |

@@ -2,15 +2,14 @@
 import os
 import subprocess
 import sys
+import types
 from datetime import date, datetime
 
 import pytest
 
 import main
 from src.config import Settings
-from src.models import EstacaoModel, EstadoModel, ParametroModel
-from src.services.parametro_service import ParametroService
-from src.services.validation_service import ValidationService
+from src.models import EstacaoModel, ParametroModel
 
 
 class Falha(Exception):
@@ -22,6 +21,20 @@ PARAMETRO_PH = ParametroModel(
     valor_minimo=0, valor_maximo=14,
 )
 REGISTRO_VALIDO = {"registro_codigo": "R1", "itens": [{"campo": "ph", "valor": 7.0}]}
+# Formato de ValidationService.validar_contrato (Bronze) e de validate_data (Silver).
+RECUSADO_NO_CONTRATO = {
+    "registro_codigo": "R3", "valido": False,
+    "motivos": [{"etapa": "Validação do Contrato", "campo": "operador_codigo",
+                 "motivo": "Field required", "valor": None}],
+}
+RESULTADOS_DA_SILVER = (
+    {"registro_codigo": "R1", "valido": True, "campos_nulos": [],
+     "itens_invalidos": [], "motivos": [], "registro": REGISTRO_VALIDO},
+    {"registro_codigo": "R2", "valido": False, "campos_nulos": ["estacao_codigo"],
+     "itens_invalidos": [], "motivos": [{"etapa": "completude", "campo": "estacao_codigo",
+                                         "motivo": "campo vital nulo", "valor": None}],
+     "registro": {"registro_codigo": "R2", "itens": []}},
+)
 ESTACAO = EstacaoModel(
     id_estacao=5, codigo_estacao="EST-RJ-001", nome="Estação", municipio_id=1, latitude=-22.9, longitude=-43.2,
 )
@@ -43,55 +56,31 @@ def pipeline_falso(monkeypatch):
 
         def fetch_data(self):
             chamadas.append("coleta")
-            return ["bruto"]
+            return ["bruto R1", "bruto R2", "bruto R3"]
 
-    class NormalizacaoFalsa:
-        def normalize(self, dados):
-            chamadas.append("normalização")
-            return ["normalizado"]
+    class ExtracaoFalsa:
+        """Data lake em memória: Bronze recusa R3, Silver valida R1 e recusa R2."""
 
-        @staticmethod
-        def descobrir_parametros(dados):
-            return {"TIP-PH": {"campo": "ph", "unidade_medida": "pH"}}
+        def __init__(self, fonte_dados, diretorio_base):
+            chamadas.append(("data lake", fonte_dados, diretorio_base))
 
-    class ParametroRepositoryFalso:
-        def __init__(self, database):
-            pass
+        def extrair_dados_bronze(self, dados):
+            chamadas.append("bronze")
+            return [RECUSADO_NO_CONTRATO]
 
-    class ParametroServiceFalso:
-        def __init__(self, repository):
-            pass
+        def extrair_dados_silver(self, nome_arquivo_bronze):
+            chamadas.append(("silver", nome_arquivo_bronze))
+            return list(RESULTADOS_DA_SILVER), {"TIP-PH": PARAMETRO_PH}
 
-        def sincronizar(self, descobertos):
-            chamadas.append(("parâmetros", sorted(descobertos)))
-            return {"TIP-PH": PARAMETRO_PH}
+        def extrair_dados_gold(self, nome_arquivo_silver):
+            chamadas.append(("gold", nome_arquivo_silver))
 
-        faixas = staticmethod(ParametroService.faixas)
-
-    class EstadoRepositoryFalso:
-        def __init__(self, database):
-            pass
-
-        def get_all(self):
-            chamadas.append("estados")
-            return [EstadoModel(sigla="RJ", nome="Rio de Janeiro")]
-
-    class ValidacaoFalsa:
-        def __init__(self, **kwargs):
-            chamadas.append(("regras da validação", kwargs))
-
-        def validate_data(self, dados):
-            chamadas.append("validação")
-            return [
-                {"registro_codigo": "R1", "valido": True, "campos_nulos": [],
-                 "itens_invalidos": [], "motivos": [], "registro": REGISTRO_VALIDO},
-                {"registro_codigo": "R2", "valido": False, "campos_nulos": ["estacao_codigo"],
-                 "itens_invalidos": [], "motivos": [{"etapa": "completude", "campo": "estacao_codigo",
-                                                     "motivo": "campo vital nulo", "valor": None}],
-                 "registro": {"registro_codigo": "R2", "itens": []}},
-            ]
-
-        registros_validos = staticmethod(ValidationService.registros_validos)
+    # Por quê: o run_pipeline importa o módulo do data lake só na execução, e o
+    # módulo real chama a API já na importação. Um módulo falso em sys.modules
+    # é o que o "from src.ingestion.extracao_dados import ..." vai encontrar.
+    modulo_data_lake = types.ModuleType("src.ingestion.extracao_dados")
+    modulo_data_lake.Extracao_Dados = ExtracaoFalsa
+    monkeypatch.setitem(sys.modules, "src.ingestion.extracao_dados", modulo_data_lake)
 
     class DatabaseFalso:
         def __init__(self, connection_string):
@@ -124,12 +113,7 @@ def pipeline_falso(monkeypatch):
 
     monkeypatch.setattr(main, "load_config", carregar_config)
     monkeypatch.setattr(main, "DataClient", DataClientFalso)
-    monkeypatch.setattr(main, "NormalizationService", NormalizacaoFalsa)
-    monkeypatch.setattr(main, "ValidationService", ValidacaoFalsa)
     monkeypatch.setattr(main, "DatabaseConnection", DatabaseFalso)
-    monkeypatch.setattr(main, "ParametroRepository", ParametroRepositoryFalso)
-    monkeypatch.setattr(main, "ParametroService", ParametroServiceFalso)
-    monkeypatch.setattr(main, "EstadoRepository", EstadoRepositoryFalso)
     monkeypatch.setattr(main, "LeituraRepository", LeituraRepositoryFalso)
     monkeypatch.setattr(main, "AnaliticsService", AnaliseFalsa)
     return chamadas
@@ -142,26 +126,20 @@ def test_importar_main_nao_executa_o_pipeline():
 def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
     resumo = main.run_pipeline()
 
+    # Parte A (data lake) inteira antes da parte B (banco); só R1 chega ao banco.
     assert pipeline_falso == [
         "configuração",
         "coleta",
-        "normalização",
-        ("parâmetros", ["TIP-PH"]),
-        "estados",
-        (
-            "regras da validação",
-            {
-                "faixas": {"TIP-PH": (0.0, 14.0)},
-                "siglas_estados": {"RJ"},
-                "parametros_validos": {"TIP-PH"},
-            },
-        ),
-        "validação",
+        ("data lake", "http://api", "data_lake"),
+        "bronze",
+        ("silver", "dados_bronze.json"),
+        ("gold", "dados_silver.parquet"),
         ("persistência", [REGISTRO_VALIDO], ["TIP-PH"], "http://api"),
     ]
+    # Fecha com o recebido: 1 recusado antes da validação + 1 válido + 1 inválido = 3.
     assert resumo == {
-        "recebidos": 1,
-        "rejeitados_na_normalizacao": 0,
+        "recebidos": 3,
+        "rejeitados_na_normalizacao": 1,
         "registros_validos": 1,
         "registros_invalidos": 1,
         "itens_descartados": 0,
@@ -169,6 +147,15 @@ def test_run_pipeline_executa_as_etapas_na_ordem(pipeline_falso):
         "leituras_substituidas": 0,
         "itens_gravados": 1,
     }
+
+
+def test_recusados_no_contrato_e_na_validacao_vao_para_o_log(pipeline_falso, logs_temporarios):
+    main.run_pipeline()
+
+    rejeitados = logs_temporarios("rejeitados")
+    assert any("registro=R3" in linha and "campo=operador_codigo" in linha for linha in rejeitados)
+    assert any("registro=R2" in linha and "campo=estacao_codigo" in linha for linha in rejeitados)
+    assert not any("registro=R1" in linha for linha in rejeitados)
 
 
 def test_lote_vazio_encerra_sem_tocar_no_banco(pipeline_falso, monkeypatch):
@@ -263,22 +250,19 @@ def test_argumentos_invalidos_encerram_com_erro(argv):
     assert erro.value.code == 2
 
 
+def falhar(*args, **kwargs):
+    raise Falha("detalhe")
+
+
 @pytest.mark.parametrize(
     ("alvo", "metodo"),
     [
         ("load_config", None),
         ("DataClient", "fetch_data"),
-        ("NormalizationService", "normalize"),
-        ("ParametroService", "sincronizar"),
-        ("EstadoRepository", "get_all"),
-        ("ValidationService", "validate_data"),
         ("LeituraRepository", "save_readings"),
     ],
 )
 def test_falha_em_qualquer_etapa_propaga_o_erro_original(pipeline_falso, monkeypatch, alvo, metodo):
-    def falhar(*args, **kwargs):
-        raise Falha("detalhe")
-
     if metodo is None:
         monkeypatch.setattr(main, alvo, falhar)
     else:
@@ -288,10 +272,11 @@ def test_falha_em_qualquer_etapa_propaga_o_erro_original(pipeline_falso, monkeyp
         main.run_pipeline()
 
 
-def test_falha_interrompe_as_etapas_seguintes(pipeline_falso, monkeypatch):
-    monkeypatch.setattr(main.ValidationService, "validate_data", lambda self, d: (_ for _ in ()).throw(Falha("x")))
+@pytest.mark.parametrize("camada", ["extrair_dados_bronze", "extrair_dados_silver", "extrair_dados_gold"])
+def test_falha_no_data_lake_interrompe_antes_do_banco(pipeline_falso, monkeypatch, camada):
+    monkeypatch.setattr(sys.modules["src.ingestion.extracao_dados"].Extracao_Dados, camada, falhar)
 
-    with pytest.raises(Falha):
+    with pytest.raises(Falha, match="detalhe"):
         main.run_pipeline()
 
     assert not any(c[0] in {"persistência", "banco da análise"} for c in pipeline_falso if isinstance(c, tuple))

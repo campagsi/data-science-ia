@@ -103,6 +103,22 @@ class LeiturasFalsas:
             for codigo, leituras in sorted(por_estacao.items())
         ]
 
+    def get_operadores(self):
+        """Códigos dos operadores por estação, como o SQL do repositório (OP-1 quando a medição não tem)."""
+        por_chave: dict[tuple[str, str], set] = {}
+        for m in self.medicoes:
+            por_chave.setdefault((m["estacao_codigo"], m.get("operador_codigo", "OP-1")), set()).add((m["codigo_registro"], m["data_hora"]))
+        return [
+            {
+                "estacao_codigo": estacao,
+                "operador_codigo": operador,
+                "primeira_leitura": min(instante for _, instante in leituras),
+                "ultima_leitura": max(instante for _, instante in leituras),
+                "leituras": len(leituras),
+            }
+            for (estacao, operador), leituras in sorted(por_chave.items())
+        ]
+
 
 class CadastroFalso:
     """Imita os repositórios de estações, municípios e parâmetros (só os métodos de leitura)."""

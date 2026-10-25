@@ -73,7 +73,8 @@ def test_pedido_leva_ferramentas_e_a_resposta_forcada_as_proibe():
     livre, forcada = sdk.pedidos
     assert livre["tools"][0] == {"type": "function", "function": {"name": "panorama_dados", "description": "Período coberto.", "parameters": {"type": "object", "properties": {}}}}
     assert (livre["tool_choice"], forcada["tool_choice"], livre["max_completion_tokens"]) == ("auto", "none", 8000)
-    assert "temperature" not in livre and "reasoning_effort" not in livre  # gpt-4.1-mini não é modelo de raciocínio
+    # gpt-4.1-mini não é modelo de raciocínio: sem esforço e com temperatura 0 (respostas repetíveis).
+    assert "reasoning_effort" not in livre and livre["temperature"] == forcada["temperature"] == 0
 
 
 def test_modelo_de_raciocinio_recebe_o_esforco():
@@ -82,6 +83,7 @@ def test_modelo_de_raciocinio_recebe_o_esforco():
     ClienteOpenAI("k", "gpt-5-mini", esforco="low", cliente=sdk).gerar("s", [Mensagem.usuario("oi")], [])
 
     assert sdk.pedidos[0]["reasoning_effort"] == "low"
+    assert "temperature" not in sdk.pedidos[0]  # modelos de raciocínio recusam o parâmetro
 
 
 def test_resposta_com_ferramentas_argumentos_invalidos_e_recusa():

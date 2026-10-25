@@ -52,9 +52,18 @@ def sha256_do_arquivo(caminho: Path) -> str:
     return hashlib.sha256(caminho.read_bytes()).hexdigest()
 
 
-def salvar_modelo(avaliacoes: list[AvaliacaoHorizonte], pasta: Path, agora: datetime | None = None) -> Path:
+def salvar_modelo(
+    avaliacoes: list[AvaliacaoHorizonte], pasta: Path, agora: datetime | None = None, assinatura: dict | None = None
+) -> Path:
     """
     Grava os Pipelines aprovados e o metadados.json (com todas as avaliações, aprovadas ou não).
+
+    Args:
+        avaliacoes: resultado de treinar().
+        pasta: destino (pasta_do_modelo_de_previsao).
+        agora: instante do treino (injetável nos testes).
+        assinatura: assinatura dos dados usados no treino (ConsultaDados.assinatura()),
+            gravada em "assinatura_dados" para o painel saber se o modelo está em dia.
 
     Returns:
         O caminho do metadados.json.
@@ -75,6 +84,7 @@ def salvar_modelo(avaliacoes: list[AvaliacaoHorizonte], pasta: Path, agora: date
         "criado_em": (agora or datetime.now()).isoformat(timespec="seconds"),
         "versao_sklearn": sklearn.__version__,
         "sha256": sha256_do_arquivo(caminho_modelo),
+        "assinatura_dados": assinatura,
         "aprovados": sorted(a.chave for a in avaliacoes if a.aprovado),
         "avaliacoes": {
             a.chave: {

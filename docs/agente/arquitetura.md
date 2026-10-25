@@ -180,6 +180,7 @@ Data-Science-Ia/
 │   │   ├── orquestrador.py        # classe Agente: o laço de tool use
 │   │   ├── prompts.py             # system prompt e modelos de texto
 │   │   ├── fabrica.py             # criar_agente(): monta tudo a partir da configuração
+│   │   ├── manutencao.py          # base do agente: situação e atualização (painel /agente e main.py)
 │   │   ├── avaliacao/             # Fase 8: python -m src.agente.avaliacao
 │   │   │   ├── golden.py          # casos do golden set (Pydantic, extra="forbid")
 │   │   │   ├── metricas.py        # precisão, recall, hit@k, MRR, matriz de recusa (funções puras)
@@ -615,7 +616,7 @@ Os nomes entram no `.env.example` (sem valores reais) na fase que os usa. As var
 | `src/database/connection.py` | `DatabaseConnection(cfg.sql_connectionstring)` com o usuário `agente_leitura` | Nenhuma (o construtor já aceita a connection string) |
 | `main.py` | Argumentos `--agente`, `--pergunta`, `--indexar`, `--indexar-dias`, `--treinar-previsao` e `--laudo` (com `--inicio`, `--fim`, `--estacao` e `--limite`) | **Novos argumentos** (Fases 3, 4, 9, 10 e 11) |
 | `src/ui/app.py` | Registrar o Blueprint `agente` | **Uma linha** (Fase 7) |
-| Banco (`sql/`) | Script `sql/seguranca/agente_usuario_leitura.sql`: usuário só com `SELECT` nas tabelas usadas e `DENY` em `Operadores` (POL-01, POL-02). Muda permissões, não estrutura, então não é migration. Sem tabela nova: DA3 = ChromaDB | **Script novo** (Fase 2), executado por quem administra o banco |
+| Banco (`sql/`) | Script `sql/seguranca/agente_usuario_leitura.sql`: usuário só com `SELECT` nas tabelas usadas e só o código de `Operadores` (nome, CPF, e-mail e município negados por coluna) (POL-01, POL-02). Muda permissões, não estrutura, então não é migration. Sem tabela nova: DA3 = ChromaDB | **Script novo** (Fase 2), executado por quem administra o banco |
 
 **O agente nunca chama:** `run_pipeline()`, repositórios de escrita (`save_readings`, `substituir_leituras`, `insert_leituras`, `merge_many`, `create_many`), `OperadorRepository` nem `descriptografar_email()`. Um teste estático garante isso (POL-01), e o usuário do banco impede mesmo se o código errar.
 
@@ -655,6 +656,26 @@ python main.py --agente                                    # chat interativo; "s
 Erros devolvem `{"erro": "mensagem amigável"}` com HTTP 400 (pergunta vazia ou longa demais, limite de 1.000 caracteres), 401 (`X-API-Key` ausente ou errada, quando exigida), 429 (limite de requisições, POL-07) ou 503 (provedor de LLM indisponível).
 
 A página converte o Markdown no servidor com `markdown-it-py` (HTML desabilitado) e envia o cabeçalho `Content-Security-Policy` (POL-09).
+
+### Painel "Base do agente"
+
+A barra lateral da página `/agente` mostra os três artefatos que o agente consulta e que são gerados fora do laço de perguntas. Cada um tem um botão próprio ("Atualizar" ou "Treinar"), e há também o botão "Atualizar tudo". Código: `src/agente/manutencao.py` (núcleo, compartilhado com os comandos do `main.py`) e as rotas em `src/ui/agente.py`.
+
+| Artefato | Fica desatualizado quando | Atualização (botão ou CLI) |
+|---|---|---|
+| Documentação (RAG) | os ids dos trechos dos `.md` (sha256 de modelo + arquivo + seção + texto) diferem dos do índice salvo | `--indexar` |
+| Dias semelhantes | a assinatura dos dados mudou desde a última indexação | `--indexar-dias` |
+| Modelo de previsão | a assinatura dos dados mudou desde o último treino, ou o modelo seria recusado pela POL-12 (hash ou versão do scikit-learn) | `--treinar-previsao` (~1 min) |
+
+A **assinatura dos dados** (`LeituraRepository.get_assinatura()`) é uma consulta só de leitura: quantidade de medições, primeira e última leitura e `CHECKSUM_AGG(BINARY_CHECKSUM(codigo_registro, parametro_id, valor))`. Ela não usa `id_leitura` nem `data_ingestao`, então reingerir os mesmos dados não muda a assinatura e não obriga a retreinar. A assinatura é gravada em `AGENTE_DIR_INDICE/dias/estado.json` e no campo `assinatura_dados` do `metadados.json` do modelo. Um índice ou modelo gerado antes desta versão, sem assinatura, aparece como desatualizado.
+
+Situações: **Em dia**, **Desatualizado**, **Ausente** (nunca gerado, ou gerado com outro modelo de embeddings) e **Indisponível** (sem `AGENTE_SQL_CONNECTIONSTRING` ou com o banco fora do ar; só para os dias e a previsão). O botão só habilita em "Desatualizado" ou "Ausente", e o servidor confere de novo.
+
+- `GET /agente/base` devolve `{"itens": {"documentacao": {"situacao", "motivo", "atualizado_em", "nome"}, ...}, "tarefa": {"executando", "etapa", "itens", "concluidos", "falhas", "terminou_em"}}`. A situação fica em cache por 30 s.
+- `POST /agente/base/atualizar` com `{"itens": "todos"}` (só os pendentes) ou `{"itens": ["dias", "previsao"]}` responde 202 e roda a atualização em segundo plano, **uma por vez** (409 se já houver uma em andamento). Responde 400 para um item em dia, indisponível ou desconhecido. A página acompanha o andamento consultando `GET /agente/base` a cada 2 s.
+- A falha de um item não impede os seguintes e vai para o log só com o tipo do erro (POL-10). Se algum item for concluído, o **agente da web é descartado**, e a próxima pergunta monta um agente novo, com o índice e o modelo novos, sem reiniciar o servidor.
+- A ingestão pelo dashboard (`POST /ingestao`) avisa o painel: a situação é recalculada e o agente da web também é descartado, o que esvazia o cache de 5 minutos das consultas.
+- As duas rotas exigem `X-API-Key` quando `AGENTE_CHAVE_WEB` está definida (POL-10). O `POST` tem limite próprio de 10 por hora por IP (POL-07), porque cada atualização pode treinar o modelo.
 
 ## 12. Observabilidade
 

@@ -1,7 +1,6 @@
 import argparse
 import sys
-import time
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from src.cli.console_app import Console_APP
@@ -15,6 +14,7 @@ from src.logger import (
     registrar_resultados_validacao,
     registrar_resumo,
 )
+from src.models import ParametroModel
 from src.repository.leitura_repository import LeituraRepository
 from src.security import configurar_seguranca
 from src.services.analytics_service import AnaliticsService
@@ -36,94 +36,53 @@ _CAMPOS_RESUMO = (
 
 def run_pipeline() -> dict[str, int]:
     """
-    Executa a ingestão: coleta, normalização, cadastro de parâmetros, validação
-    e gravação idempotente no banco. Devolve o resumo da execução.
+    Executa a ingestão (python main.py --ingestao) e devolve o resumo.
 
-    Nenhum registro chega ao banco sem passar pela validação (etapa 5), e nada
-    do que é recusado se perde: tudo vai para o log de rejeitados (etapa 6).
+    O lote percorre duas partes, nesta ordem:
+
+        Coleta (API)
+          │
+          ├─ Parte A: data lake ── _processar_no_data_lake()
+          │    Bronze  lote como chegou, conferido pelo contrato (JSON)
+          │    Silver  tratado, anonimizado e validado registro a registro (Parquet)
+          │    Gold    modelo estrela para o Power BI (Parquet)
+          │
+          └─ Parte B: banco relacional (Azure SQL, 3FN) ── _gravar_no_banco()
+               log de rejeitados → filtro dos válidos → gravação idempotente
+
+    A parte B não refaz o tratamento: ela recebe da Silver o resultado da
+    validação de cada registro. Por isso nenhum registro chega ao banco sem
+    ter sido anonimizado e validado, e nada do que é recusado se perde: tudo
+    vai para o log de rejeitados.
     """
-    # 1. Coleta: busca o lote bruto (JSON) na API configurada em FONTE_DADOS,
-    #    com novas tentativas para queda de conexão, 5xx e 429 e limite de
-    #    requisições por minuto. Lote vazio encerra aqui, sem tocar no banco.
     settings = load_config()
+
+    # 1. Coleta: busca o lote bruto (lista de dicionários) na API configurada
+    #    em FONTE_DADOS, com novas tentativas para queda de conexão, 5xx e 429
+    #    e limite de requisições por minuto. Lote vazio encerra aqui, sem criar
+    #    arquivos no data lake e sem tocar no banco.
     raw_data = DataClient(settings).fetch_data()
     if not raw_data:
         resumo = dict.fromkeys(_CAMPOS_RESUMO, 0)
         registrar_resumo(**resumo)
         return resumo
 
-    # Por quê: importado aqui, e não no topo. O módulo chama a API de ingestão
-    # já na importação; no topo, nenhum outro modo do main.py (análise, agente)
-    # funcionaria com a API parada.
-    from src.ingestion.extracao_dados import Extracao_Dados
-
-    # Realiza a extração dos dados para camada Bronze, salvando o arquivo em JSON
-    extracao_dados = Extracao_Dados(
-        fonte_dados=settings.fonte_dados, diretorio_base="data_lake"
-    )
-    log = extracao_dados.extrair_dados_bronze(raw_data)
-    registrar_resultados_validacao(resultados=log, nivel="Registro")
-    # validacao = registrar_resultados_validacao(resultados=normalized_data_silver)
-    # 2. Tratamento: texto vazio vira None, números e datas são convertidos,
-    #    cada registro vira cabeçalho + itens (um por parâmetro) e CPF, nome e
-    #    e-mail do operador são anonimizados. Valor que não pode ser convertido
-    #    é rejeitado e logado aqui, sem derrubar o lote; medição vazia segue
-    #    como None para a validação decidir.
-    # normalized_data = NormalizationService().normalize(raw_data)
-
-    # Realia a extração dos dados para a camada silver a partir dos dados extraidos pela camda bronze
-    normalized_data_silver, parametros = extracao_dados.extrair_dados_silver(
-        "dados_bronze.json"
+    # Parte A (etapas 2 a 4): tratamento e validação, nas camadas do data lake.
+    resultados_validacao, parametros = _processar_no_data_lake(
+        raw_data, settings.fonte_dados
     )
 
-    # Realiza a extração de dados para a camada gold a partir dos dados extraidos pela camada silver
-    extracao_dados.extrair_dados_gold("dados_silver.parquet")
+    # Parte B (etapas 5 a 7): log, filtro e gravação no banco relacional.
+    validacao, gravacao = _gravar_no_banco(resultados_validacao, parametros, settings)
 
-    # O schema é mantido por sql/ddl_banco_relacional.sql e sql/migrations/.
-    database = DatabaseConnection(settings.azure_sql_connectionstring)
-
-    # 3. Parâmetros: os encontrados no lote (*_tipo_codigo) e ainda não
-    #    cadastrados são inseridos em Parametros, sem faixa. Volta o mapa
-    #    código → parâmetro aceito, com id e faixa de valores.
-    # parametros = ParametroService(ParametroRepository(database)).sincronizar(
-    #     NormalizationService.descobrir_parametros(normalized_data_silver)
-    # )
-
-    # 4. Referência: siglas de Estados, para conferir o estado de cada leitura.
-    # siglas = {estado.sigla for estado in EstadoRepository(database).get_all()}
-
-    # 5. Validação, antes de qualquer gravação. Não grava nem loga: devolve um
-    #    resultado por registro (valido, campos_nulos, itens_invalidos, motivos).
-    #    - completude: campo vital nulo rejeita a leitura; medição nula descarta
-    #      só o item; leitura sem nenhuma medição válida é rejeitada;
-    #    - acurácia: valor fora da faixa do parâmetro descarta só o item;
-    #    - referência e validade: estado inexistente ou sigla inválida;
-    #    - unicidade: registro repetido no lote e cadastro divergente.
-    # resultados = ValidationService(
-    #     faixas=ParametroService.faixas(parametros),
-    #     siglas_estados=siglas,
-    #     parametros_validos=set(parametros),
-    # ).validate_data(normalized_data)
-
-    # 6. Log de rejeitados a partir dos resultados: uma linha por leitura
-    #    recusada e uma por medição descartada (sem dado pessoal).
-    validacao = registrar_resultados_validacao(resultados=normalized_data_silver)
-
-    # 7. Filtro: só os registros com valido=True, já sem os itens descartados.
-    validated_data = ValidationService.registros_validos(normalized_data_silver)
-
-    # 8. Gravação idempotente, numa única transação: municípios, operadores e
-    #    estações por MERGE; leituras e itens substituindo as partições
-    #    estação + dia. Reexecutar o mesmo período não duplica; se algo falhar,
-    #    nada do lote fica gravado.
-    gravacao = LeituraRepository(database).save_readings(
-        validated_data, parametros, settings.fonte_dados
-    )
-
-    # 9. Resumo da execução no log (e retorno da função).
+    # 8. Resumo da execução no log (e retorno da função). "Banco + rejeitados"
+    #    fecha com o recebido: recebidos = rejeitados_na_normalizacao
+    #    + registros_validos + registros_invalidos.
     resumo = {
         "recebidos": len(raw_data),
-        "rejeitados_na_normalizacao": len(raw_data) - len(normalized_data_silver),
+        # Quem não chegou à validação: recusado pelo contrato na Bronze,
+        # registro_codigo repetido removido na Silver ou recusado na normalização.
+        "rejeitados_na_normalizacao": len(raw_data) - len(resultados_validacao),
         "registros_validos": validacao["registros_validos"],
         "registros_invalidos": validacao["registros_invalidos"],
         "itens_descartados": validacao["itens_invalidos"],
@@ -133,6 +92,94 @@ def run_pipeline() -> dict[str, int]:
     }
     registrar_resumo(**resumo)
     return resumo
+
+
+def _processar_no_data_lake(
+    raw_data: list[dict[str, Any]], fonte_dados: str
+) -> tuple[list[dict[str, Any]], dict[str, ParametroModel]]:
+    """
+    Parte A da ingestão: passa o lote pelas camadas Bronze, Silver e Gold,
+    gravadas em data_lake/ (src/ingestion/extracao_dados.py).
+
+    Devolve o que a parte B precisa:
+    - o resultado da validação de cada registro, no formato de
+      ValidationService.validate_data(): valido, campos_nulos,
+      itens_invalidos, motivos e o registro já anonimizado e sem os itens
+      descartados;
+    - os parâmetros aceitos (código → ParametroModel, com id e faixa).
+    """
+    # Por quê: importado aqui, e não no topo. O módulo chama a API de ingestão
+    # já na importação; no topo, nenhum outro modo do main.py (análise, agente)
+    # funcionaria com a API parada.
+    from src.ingestion.extracao_dados import Extracao_Dados
+
+    extracao = Extracao_Dados(fonte_dados=fonte_dados, diretorio_base="data_lake")
+
+    # 2. Bronze: cada registro é conferido pelo contrato (DataContract: campos
+    #    obrigatórios e tipos). Os aceitos são gravados como chegaram em
+    #    data_lake/bronze/dados_bronze.json, ainda com CPF, nome e e-mail em
+    #    claro (por isso data_lake/ fica fora do Git). Os recusados vão já para
+    #    o log de rejeitados.
+    recusados_no_contrato = extracao.extrair_dados_bronze(raw_data)
+    registrar_resultados_validacao(resultados=recusados_no_contrato, nivel="Registro")
+
+    # 3. Silver: lê a Bronze e prepara o lote para o banco, nesta ordem:
+    #    a. remove registro_codigo repetido (fica a última ocorrência);
+    #    b. normaliza e anonimiza (NormalizationService): texto vazio vira
+    #       None, números e datas são convertidos, cada registro vira
+    #       cabeçalho + itens (um por parâmetro), CPF e nome viram hash
+    #       (HMAC-SHA256) e o e-mail é criptografado (src/security.py). Valor
+    #       que não pode ser convertido é rejeitado e logado, sem derrubar o
+    #       lote; medição vazia segue como None para a validação decidir;
+    #    c. cadastra em Parametros os parâmetros novos do lote (sem faixa) e
+    #       lê as siglas de Estados, que a validação usa como referência;
+    #    d. valida cada registro (ValidationService.validate_data): campo
+    #       vital nulo, estado inexistente ou cadastro divergente rejeita a
+    #       leitura; medição nula ou fora da faixa descarta só o item.
+    #    Os registros válidos são gravados em data_lake/silver/dados_silver.parquet.
+    #    Volta o resultado de TODOS os registros, válidos e inválidos.
+    resultados_validacao, parametros = extracao.extrair_dados_silver("dados_bronze.json")
+
+    # 4. Gold: a partir da Silver, monta as dimensões (estação, parâmetro,
+    #    tempo) e a tabela fato de medições em data_lake/gold/, consumidas
+    #    pela API do Power BI. Não participa da gravação no banco.
+    extracao.extrair_dados_gold("dados_silver.parquet")
+
+    return resultados_validacao, parametros
+
+
+def _gravar_no_banco(
+    resultados_validacao: list[dict[str, Any]],
+    parametros: dict[str, ParametroModel],
+    settings: Settings,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """
+    Parte B da ingestão: grava no banco relacional o que a validação aprovou.
+
+    O schema não é criado aqui: ele é mantido por sql/ddl_banco_relacional.sql
+    e sql/migrations/. Devolve as contagens da validação e da gravação.
+    """
+    # 5. Log de rejeitados: uma linha por motivo de cada leitura recusada e uma
+    #    por medição descartada, em logs/. CPF, nome e e-mail nunca aparecem.
+    validacao = registrar_resultados_validacao(resultados=resultados_validacao)
+
+    # 6. Filtro: só os registros com valido=True, já sem os itens descartados.
+    registros_validos = ValidationService.registros_validos(resultados_validacao)
+
+    # 7. Gravação idempotente, numa única transação, na ordem das chaves
+    #    estrangeiras (LeituraRepository.save_readings):
+    #    - Estados: só leitura (as 27 siglas vêm de sql/dml_populacao.sql);
+    #    - Municipios, Operadores e Estacoes: MERGE pelo código, ou seja,
+    #      insere o que é novo e atualiza o que já existe;
+    #    - Leituras e Leitura_Itens: apaga as leituras já gravadas da mesma
+    #      estação + dia (ou do mesmo codigo_registro) e insere o lote de novo.
+    #    Reexecutar o mesmo período não duplica nada; se qualquer etapa falhar,
+    #    o rollback desfaz o lote inteiro e o banco fica como estava.
+    database = DatabaseConnection(settings.azure_sql_connectionstring)
+    gravacao = LeituraRepository(database).save_readings(
+        registros_validos, parametros, settings.fonte_dados
+    )
+    return validacao, gravacao
 
 
 def gerar_relatorio(
@@ -211,12 +258,10 @@ def indexar_documentacao():
     """
     configurar_logs("indexacao")
     # Por quê: import aqui para os outros modos não carregarem o onnxruntime.
-    from src.agente.rag.embeddings import EmbedderFastembed
-    from src.agente.rag.indexador import indexar
+    from src.agente.manutencao import atualizar_documentacao
     from src.config import load_config_indice
 
-    cfg = load_config_indice()
-    return indexar(EmbedderFastembed(cfg.embeddings_modelo, cfg.dir_indice / "modelos"), cfg.dir_indice, vetores=cfg.vetores)
+    return atualizar_documentacao(load_config_indice())
 
 
 def indexar_dias():
@@ -226,19 +271,14 @@ def indexar_dias():
     Lê todas as medições com o usuário só de leitura (AGENTE_SQL_CONNECTIONSTRING),
     gera um resumo por estação e dia e sincroniza o índice em AGENTE_DIR_INDICE/dias.
     Idempotente como o --indexar: só os dias cujo resumo mudou são vetorizados.
+    Grava a assinatura dos dados, que o painel da página /agente compara com a atual.
     """
     configurar_logs("indexacao")
     # Por quê: import aqui para os outros modos não carregarem o onnxruntime.
-    from src.agente.dias.indice import indexar_dias as sincronizar_dias
-    from src.agente.ferramentas.consulta_dados import ConsultaDados, FiltroMedicoes
-    from src.agente.rag.embeddings import EmbedderFastembed
+    from src.agente.manutencao import atualizar_dias
     from src.config import load_config_indice
 
-    cfg = load_config_indice()
-    if not cfg.sql_connectionstring:
-        raise ValueError("A variável AGENTE_SQL_CONNECTIONSTRING deve estar configurada para o --indexar-dias.")
-    medicoes = ConsultaDados.do_banco(DatabaseConnection(cfg.sql_connectionstring)).medicoes(FiltroMedicoes())
-    return sincronizar_dias(medicoes, EmbedderFastembed(cfg.embeddings_modelo, cfg.dir_indice / "modelos"), cfg.dir_indice, cfg.vetores)
+    return atualizar_dias(load_config_indice())
 
 
 def treinar_previsao():
@@ -247,34 +287,17 @@ def treinar_previsao():
 
     Lê as medições com o usuário só de leitura (AGENTE_SQL_CONNECTIONSTRING),
     avalia cada parâmetro × horizonte com TimeSeriesSplit contra os dois baselines,
-    grava o modelo e o metadados.json em AGENTE_DIR_INDICE/modelos/previsao e o
-    relatório em relatorios/.
+    grava o modelo e o metadados.json (com a assinatura dos dados) em
+    AGENTE_DIR_INDICE/modelos/previsao e o relatório em relatorios/.
 
     Returns:
         Caminho do relatório.
     """
     configurar_logs("previsao")
-    from src.agente.fabrica import pasta_do_modelo_de_previsao
-    from src.agente.ferramentas.consulta_dados import ConsultaDados, FiltroMedicoes
-    from src.config import RAIZ_PROJETO, load_config_indice
-    from src.previsao.dados import PARAMETROS_ALVO
-    from src.previsao.persistencia import salvar_modelo
-    from src.previsao.relatorio import montar_relatorio_treino
-    from src.previsao.treino import treinar
+    from src.agente.manutencao import treinar_previsao as treinar_e_salvar
+    from src.config import load_config_indice
 
-    cfg = load_config_indice()
-    if not cfg.sql_connectionstring:
-        raise ValueError("A variável AGENTE_SQL_CONNECTIONSTRING deve estar configurada para o --treinar-previsao.")
-    consulta = ConsultaDados.do_banco(DatabaseConnection(cfg.sql_connectionstring))
-    inicio = time.monotonic()
-    avaliacoes = treinar(consulta.medicoes(FiltroMedicoes(parametros=PARAMETROS_ALVO)))
-    salvar_modelo(avaliacoes, pasta_do_modelo_de_previsao(cfg.dir_indice))
-    relatorio = RAIZ_PROJETO / "relatorios" / f"previsao_{datetime.now():%Y%m%d_%H%M%S}.md"
-    relatorio.parent.mkdir(parents=True, exist_ok=True)
-    relatorio.write_text(montar_relatorio_treino(avaliacoes), encoding="utf-8")
-    aprovados = sum(a.aprovado for a in avaliacoes)
-    logger.info(f"Treino da previsão: combinacoes={len(avaliacoes)} aprovadas={aprovados} ms={int((time.monotonic() - inicio) * 1000)} relatorio={relatorio}")
-    return relatorio
+    return treinar_e_salvar(load_config_indice())
 
 
 LIMITE_LAUDOS = 50
@@ -392,7 +415,6 @@ def etapa_da_execucao(argumentos: argparse.Namespace) -> str:
 
 if __name__ == "__main__":
     argumentos = ler_argumentos(sys.argv[1:])
-    # Extracao_Dados("test").execute()
     try:
         if argumentos.indexar:
             indexar_documentacao()
